@@ -1,0 +1,1 @@
+Index.PACKAGES = {"scala" : [], "scala.print" : [], "scala.print.plugin" : [{"class" : "scala\/print\/plugin\/PrintPlugin.html", "object" : "scala\/print\/plugin\/PrintPlugin$.html", "name" : "scala.print.plugin.PrintPlugin"}]};
