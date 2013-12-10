@@ -1,13 +1,13 @@
 package scala.print.plugin
 
 import scala.tools.nsc
-//import scala.sprinter.printers._
 import nsc.Global
 import nsc.Phase
 import nsc.plugins.Plugin
 import nsc.plugins.PluginComponent
 import scala.tools.nsc.ast.Printers
 import java.io.{StringWriter, PrintWriter, File}
+import scala.collection.mutable.ArrayBuffer
 
 object SRewritePlugin {
   val baseDirectoryOpt = "base-dir:"
@@ -133,8 +133,13 @@ class SRewritePlugin(val global: Global) extends Plugin {
             //regenerate only scala files
             val fileName = unit.source.file.name
             if (fileName.endsWith(".scala")) {
+              val src: Array[Char] = unit.source.content
+              
               println("-- Source name: " + fileName + " --")
-              val sourceCode = reconstructTree(unit.body)
+              
+              //val sourceCode = reconstructTree(unit.body)
+              val sourceCode = print4(unit.body, src)
+              
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
               println("-- Source name: " + fileName + " is not processed")
@@ -145,12 +150,112 @@ class SRewritePlugin(val global: Global) extends Plugin {
         }
       }
     }
+    
+    def print4(tree: Tree, source: Array[Char]): String = {
+      def sourceStr(from: Int, to: Int) = String.valueOf(source, from, to-from)
+      
+      def print(tree: Tree): String = try {
+        // all direct children sorted by position
+        val children = extractChildren(tree)
+        val pos = try {
+          s"${tree.pos.start}..${tree.pos.end}"
+        } catch {
+          case e: java.lang.UnsupportedOperationException => "unknown"
+        }
+        
+        s"\ntree #${tree.id} of type ${tree.getClass.getName} at position ${pos}:\n$tree\n" +
+        children.map(print(_)).mkString("\n\n") 
+      }
+      
+      print(tree)
+    }
+    
+    def print3(tree: Tree, source: Array[Char]): String = {
+      def sourceStr(from: Int, to: Int) = String.valueOf(source, from, to-from)
+      
+      val treesWithoutPos: ArrayBuffer[Tree] = ArrayBuffer()
+      val treesWithPos: ArrayBuffer[Tree] = ArrayBuffer()
+      
+      def print(tree: Tree): String = try {
+        // all direct children sorted by position
+        val children: List[Tree] = extractChildren(tree).toList.sortBy(_.pos.start) // !!! .pos.start might be undefined!
+        val codeStarts = tree.pos.start :: children.map(_.pos.end)
+        val codeEnds = children.map(_.pos.start) ::: List(tree.pos.end)
+        val codeSnippets = for ((s, e) <- codeStarts zip codeEnds) yield sourceStr(s, e)
+        val childrenCode = "" :: children.map(print(_))
+        val body = for ((child, snippet) <- childrenCode zip codeSnippets) yield child + snippet
+        
+        treesWithPos.append(tree)
+        
+        s"/*<<${tree.id}*/$body/*${tree.id}>>*/"
+      } catch {
+        case e: java.lang.UnsupportedOperationException => {
+          treesWithoutPos.append(tree)
+          s"/*SORRY, tree ${tree.id} has no start/end pos*/"
+        }
+      }
+      
+      print(tree) + 
+        "\n### Trees without position:\n" + treesWithoutPos.map(dumpTree(_)).mkString("\n") +
+        "\n### Trees with position:\n"       + treesWithPos.map(dumpTree(_)).mkString("\n")
+    }
+    
+    def dumpTree(t: Tree): String = {
+      s"tree #${t.id} of type ${t.getClass.getName}:\n$t\n"
+    }
 
-    def reconstructTree(what: Tree) = {
-      val rewriter = Rewriter(global)
+    def extractChildren(tree: Tree): Iterator[Tree] = {
+      tree.productIterator.flatMap(e => e match {
+        case t: Tree => List(t)
+        case l: Iterable[_] => l.collect(new PartialFunction[Any, Tree] {
+          def apply(x: Any): Tree = x.asInstanceOf[Tree]
+          def isDefinedAt(x: Any): Boolean = x match {
+            case t: Tree => true
+            /*
+            try {
+              t.pos.start < t.pos.end 
+            } catch {
+              case e: Exception => false
+            }
+            */
+            case _ => false
+          }
+        })
+        case _ => List()
+      })
+    }
+    
+    def reconstructTree0(what: Tree): String = {
+      //val rewriter = Rewriter(global)
+      val rewriter = SimpleRewriter(global)
       "/* (begin code) */\n" +
-      rewriter.show(what, Rewriter.AFTER_NAMER, printMultiline = true) + 
+      rewriter.show(what, SimpleRewriter.AFTER_NAMER, printMultiline = true) + 
       "\n/* (end code) */"
+    }
+    
+    def reconstructTree1(what: Tree): String = {
+      what.toString
+    }
+    
+    def reconstructTree(what: Tree): String = {
+      printIt(what, "")
+    }
+    
+    def print2(t: Tree): String = {
+      t.pos.source
+      ???
+    }
+    
+    def printIt(t: Product, indent: String): String = {
+      val indentNew = indent + "\t"
+      val body = (for (child <- t.productIterator if child != Nil) yield child match {
+        case c: Product => printIt(c, indentNew)
+        case _ => s"${indentNew}WEIRD-ANY($child)"
+      }).mkString(",\n")
+      
+      sm"""|$indent${t.getClass.getName}(
+           |$body
+           |$indent)"""
     }
   }
 }
