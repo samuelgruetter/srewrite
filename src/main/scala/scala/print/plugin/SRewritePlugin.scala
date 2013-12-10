@@ -1,7 +1,7 @@
 package scala.print.plugin
 
 import scala.tools.nsc
-import scala.sprinter.printers._
+//import scala.sprinter.printers._
 import nsc.Global
 import nsc.Phase
 import nsc.plugins.Plugin
@@ -120,7 +120,7 @@ class SRewritePlugin(val global: Global) extends Plugin {
     override val runsAfter = List[String](prevPhase)
     override val runsBefore = List[String](nextPhase)
 
-    val printers = PrettyPrinters(global)
+    //val printers = PrettyPrinters(global)
 
     val phaseName = "printSourceAfter_" + prevPhase
     def newPhase(_prev: Phase): StdPhase = new PrintPhase(_prev)
@@ -147,8 +147,9 @@ class SRewritePlugin(val global: Global) extends Plugin {
     }
 
     def reconstructTree(what: Tree) = {
+      val rewriter = Rewriter(global)
       "/* (begin code) */\n" +
-      printers.show(what, PrettyPrinters.AFTER_NAMER, printMultiline = true) + 
+      rewriter.show(what, Rewriter.AFTER_NAMER, printMultiline = true) + 
       "\n/* (end code) */"
     }
   }

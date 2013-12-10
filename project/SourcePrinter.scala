@@ -31,7 +31,7 @@ object SourcePrinter extends Build {
     ) 
 
     def dependencies(sv: String) = Seq(
-      "org.scala-lang" % "scala-compiler" % sv,
-      "org.scala-lang" %% "sprinter" % "0.2.0"
+      "org.scala-lang" % "scala-compiler" % sv /*,
+      "org.scala-lang" %% "sprinter" % "0.2.0" */
     )
 }
