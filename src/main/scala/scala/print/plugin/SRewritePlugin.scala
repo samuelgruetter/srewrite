@@ -9,18 +9,18 @@ import nsc.plugins.PluginComponent
 import scala.tools.nsc.ast.Printers
 import java.io.{StringWriter, PrintWriter, File}
 
-object PrintPlugin {
+object SRewritePlugin {
   val baseDirectoryOpt = "base-dir:"
   val dirNameOpt = "dir-name:"
   val overSrcOpt = "oversrc"
 }
 
-class PrintPlugin(val global: Global) extends Plugin {
-  import PrintPlugin._
+class SRewritePlugin(val global: Global) extends Plugin {
+  import SRewritePlugin._
   import global._
 
-  val name = "printplugin"
-  val description = "print source code from AST after parser phase"
+  val name = "srewriteplugin"
+  val description = "WIP"
 
   var baseDir: String = System.getProperty("user.dir")
   var dirName = "sourceFromAST"
@@ -115,7 +115,7 @@ class PrintPlugin(val global: Global) extends Plugin {
   //Phase should be inserted between prevPhase and nextPhase
   //but it possible that not right after prevPhase or not right before nextPhase
   class PrintPhaseComponent(val prevPhase: String, val nextPhase: String) extends PluginComponent {
-    val global: PrintPlugin.this.global.type = PrintPlugin.this.global
+    val global: SRewritePlugin.this.global.type = SRewritePlugin.this.global
 
     override val runsAfter = List[String](prevPhase)
     override val runsBefore = List[String](nextPhase)
@@ -126,7 +126,7 @@ class PrintPlugin(val global: Global) extends Plugin {
     def newPhase(_prev: Phase): StdPhase = new PrintPhase(_prev)
 
     class PrintPhase(prev: Phase) extends StdPhase(prev) {
-      override def name = PrintPlugin.this.name
+      override def name = SRewritePlugin.this.name
 
       def apply(unit: CompilationUnit) {
         try {
@@ -147,7 +147,9 @@ class PrintPlugin(val global: Global) extends Plugin {
     }
 
     def reconstructTree(what: Tree) = {
-      printers.show(what, PrettyPrinters.AFTER_NAMER, printMultiline = true)
+      "/* (begin code) */\n" +
+      printers.show(what, PrettyPrinters.AFTER_NAMER, printMultiline = true) + 
+      "\n/* (end code) */"
     }
   }
 }

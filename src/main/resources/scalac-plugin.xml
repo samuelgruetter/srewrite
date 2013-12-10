@@ -1,4 +1,4 @@
 <plugin>
-  <name>printPlugin</name>
-  <classname>scala.print.plugin.PrintPlugin</classname>
+  <name>srewriteplugin</name>
+  <classname>scala.print.plugin.SRewritePlugin</classname>
 </plugin>
