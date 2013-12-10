@@ -1,4 +1,0 @@
-pygments: true
-name: PrintPlugin
-description: PrintPlugin for code regeneration from Scala ASTs.
-url: http://vladimirnik.github.io/printplugin
