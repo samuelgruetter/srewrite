@@ -11,7 +11,7 @@ object SourcePrinter extends Build {
   val buildSettings = Defaults.defaultSettings ++
     Seq(
       organization := "org.scala-lang.plugins",
-      version := "0.2.0",
+      version := "0.1.0",
       scalaVersion := "2.10.2"
     )
     val assemblyProjectSettings = Seq(
