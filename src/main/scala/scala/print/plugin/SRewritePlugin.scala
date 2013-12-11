@@ -138,8 +138,7 @@ class SRewritePlugin(val global: Global) extends Plugin {
               println("-- Source name: " + fileName + " --")
               
               //val sourceCode = reconstructTree(unit.body)
-              //val sourceCode = print4(unit.body, src)
-              val sourceCode = print5(unit.body)
+              val sourceCode = print6(unit.body, src)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -152,6 +151,64 @@ class SRewritePlugin(val global: Global) extends Plugin {
       }
     }
     
+    def hasPos(tree: Tree): Boolean = try {
+      tree.pos.start < tree.pos.end
+    } catch {
+      case e: java.lang.UnsupportedOperationException => false
+    }
+
+    class OverlapException extends Exception
+    
+    def print6(tree: Tree, source: Array[Char]): String = {
+      def sourceStr(from: Int, to: Int) = {
+        println(s"${source.length}/$from/$to")
+        String.valueOf(source, from, to-from)
+      }
+      
+      def print(tree: Tree, treeStartPos: Int, treeEndPos: Int): String = {
+        val (withpos, nopos) = tree.children.partition(hasPos(_))
+        
+        // all direct children sorted by position
+        val children = withpos.sortBy(_.pos.start)
+
+        for (c <- children if c.pos.start < treeStartPos || c.pos.end > treeEndPos) {
+          println(s"Tree of type ${tree.getClass.getName} with pos $treeStartPos..$treeEndPos has a child of type ${c.getClass.getName} with pos ${c.pos.start}..${c.pos.end}")
+          println(s"Tree = $tree\n")
+          println(s"Child = $c\n")
+        }
+        
+        if (!children.isEmpty) {
+          for ((c1, c2) <- children zip children.tail if c1.pos.end > c2.pos.start) {
+            println(s"Tree1 of type ${c1.getClass.getName} with pos ${c1.pos.start}..${c1.pos.end} overlaps with sibling Tree2 of type ${c2.getClass.getName} with pos ${c2.pos.start}..${c2.pos.end}")
+            println(s"Tree1 = $c1\n")
+            println(s"Tree2 = $c2\n")
+            throw new OverlapException
+          }
+        }
+        
+        val codeStarts = treeStartPos :: children.map(_.pos.end)
+        val codeEnds = children.map(_.pos.start) ::: List(treeEndPos)
+        val codeSnippets = for ((s, e) <- codeStarts zip codeEnds) yield sourceStr(s, e)
+        val childrenCode = "" :: children.map(c => print(c, c.pos.start, c.pos.end))
+        val body = (for ((child, snippet) <- childrenCode zip codeSnippets) yield child + snippet).mkString("")
+        
+        val noposStr = if (nopos.isEmpty) "" else 
+          nopos.map(_.getClass.getName).mkString("[Trees without position of types ", ", ", "] ") 
+        
+        if (!nopos.isEmpty) {
+          println(s"In tree #${tree.id}: $noposStr")
+        }
+        //s"/*<<${tree.id}*/$body/*$noposStr${tree.id}>>*/"
+        body
+      }
+      
+      try {
+        print(tree, 0, source.length)
+      } catch {
+        case e: OverlapException => "error"
+      }
+    }
+    
     def print5(tree: Tree): String = {
       val r = Rewriter(global)
       r.show2(tree)
@@ -161,7 +218,6 @@ class SRewritePlugin(val global: Global) extends Plugin {
       def sourceStr(from: Int, to: Int) = String.valueOf(source, from, to-from)
       
       def print(tree: Tree): String = try {
-        // all direct children sorted by position
         val children = extractChildren(tree)
         val pos = try {
           s"${tree.pos.start}..${tree.pos.end}"
