@@ -5,6 +5,7 @@ import scala.reflect.internal.Flags._
 import scala.reflect.internal._
 import scala.reflect.internal.util.{SourceFile, Statistics}
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 
 object Rewriter{
   private[Rewriter] trait PrinterDescriptor
@@ -39,6 +40,118 @@ trait Rewriter {
     printer.print(what)
     writer.flush()
     buffer.toString
+  }
+  
+  def show2(what: Reflect#Tree): String = {
+    val buffer = new StringWriter()
+    val writer = new PrintWriter(buffer)
+
+    val printer = new SnippetsPrinter(writer)
+    
+    val res = print2(what.asInstanceOf[global.Tree], printer) 
+      
+    writer.flush()
+    val shouldBeEmpty = buffer.toString
+    
+    println(s"Should be empty:'$shouldBeEmpty'")
+    
+    res
+  }
+  
+  def print2(tree: Tree, sp: SnippetsPrinter): String = {
+    def rec(tree: Tree): String = {
+      val children: List[String] = "" :: tree.children.map(rec(_))
+      val snippets = sp.snippets(tree)
+      
+      if (children.length != snippets.length) {
+        println("different length!")
+        println("children: " + ("" :: tree.children.map(_.toString)))
+        println("snippets: " + snippets.mkString("List('", "', '", "')"))
+        println()
+      }
+        
+      (for ((child, snippet) <- children zip snippets) yield child + snippet).mkString 
+    }
+    rec(tree)
+  }
+  
+  class SnippetsPrinter(out: PrintWriter, printMultiline: Boolean = false, decodeNames: Boolean = true) 
+    extends PrettyPrinter(out, printMultiline, decodeNames) 
+  {
+    
+    private var snippets: ArrayBuffer[String] = null
+    private var firstElem: Elem = null
+    private var lastElem: Elem = null
+    
+    private sealed trait Elem
+    private object TREE extends Elem
+    private object STR extends Elem
+    private object ANY extends Elem
+    
+    private def getType(a: Any): Elem = a match {
+      case t: Tree => TREE
+      case s: String => STR
+      case any => ANY
+    }
+    
+    override def print(args: Any*): Unit = {
+      if (args.length >= 1 && firstElem == null) {
+        firstElem = getType(args.head)
+        
+        args.head match {
+          case t: Tree => /* do nothing */
+          case s: String => snippets.append(s)
+          case any => scala.Console.println(s"\nNot sure what to do with this ${any.getClass.getName}:\n$any\n")
+        }
+        lastElem = getType(args.head)
+      }
+      
+      if (args.length >= 2) {
+        for (arg <- args.tail) {
+          (lastElem, arg) match {
+            case (STR, t: Tree) => /* do nothing */
+            case (STR, s: String) => snippets.update(snippets.length-1, snippets(snippets.length-1) + s)
+            case (TREE, t: Tree) => snippets.append("/*nothing between two trees*/")
+            case (TREE, s: String) => snippets.append(s)
+            case (a1, a2) => /*???*/
+          }
+          lastElem = getType(arg)
+        }
+      }
+    }
+    
+    /** returns a Seq s of Strings s.t.
+     *  s(0) + tree.children(0) + s(1) + tree.children(1) + ... s(n-1) + tree.children(n-1) + s(n)
+     *  is a string representation of tree 
+     */
+    def snippets(tree: Tree): Seq[String] = {
+      snippets = ArrayBuffer()
+      firstElem = null
+      lastElem = null
+      
+      printTree(tree)
+      
+      if (firstElem == null) return Seq() // <- return!
+      
+      val before = firstElem match {
+        case TREE => Seq("")
+        case ANY => Seq() // should not happen
+        case STR => Seq()
+      }
+      val after = lastElem match {
+        case TREE => Seq("")
+        case ANY => Seq() // should not happen
+        case STR => Seq()
+      }
+      
+      val res = before ++ snippets.toSeq ++ after
+      
+      snippets = null
+      firstElem = null
+      lastElem = null
+      
+      res
+    }
   }
 
 

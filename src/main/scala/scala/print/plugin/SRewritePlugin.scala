@@ -138,7 +138,8 @@ class SRewritePlugin(val global: Global) extends Plugin {
               println("-- Source name: " + fileName + " --")
               
               //val sourceCode = reconstructTree(unit.body)
-              val sourceCode = print4(unit.body, src)
+              //val sourceCode = print4(unit.body, src)
+              val sourceCode = print5(unit.body)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -149,6 +150,11 @@ class SRewritePlugin(val global: Global) extends Plugin {
             throw e
         }
       }
+    }
+    
+    def print5(tree: Tree): String = {
+      val r = Rewriter(global)
+      r.show2(tree)
     }
     
     def print4(tree: Tree, source: Array[Char]): String = {
