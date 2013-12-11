@@ -199,7 +199,8 @@ class SRewritePlugin(val global: Global) extends Plugin {
           println(s"In tree #${tree.id}: $noposStr")
         }
         //s"/*<<${tree.id}*/$body/*$noposStr${tree.id}>>*/"
-        body
+        //body
+        s"/*<<${tree.id}*/$body/*${tree.id}>>*/"
       }
       
       try {
@@ -208,6 +209,7 @@ class SRewritePlugin(val global: Global) extends Plugin {
         case e: OverlapException => "error"
       }
     }
+    
   }
 }
 
