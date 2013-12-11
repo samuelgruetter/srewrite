@@ -26,12 +26,15 @@ class SRewritePlugin(val global: Global) extends Plugin {
   var dirName = "sourceFromAST"
   var overrideSrc = false
 
-  //object afterTyper extends PrintPhaseComponent("typer", "patmat")
   object afterParser extends PrintPhaseComponent("parser", "namer")
+  object afterTyper extends AfterTyperPhaseComponent("typer", "patmat")
 
-  val components = List[PluginComponent](afterParser)
+  val components = List[PluginComponent](afterParser, afterTyper)
   //val components = List[PluginComponent](afterTyper)
 
+  val fileToAfterParserTree = scala.collection.mutable.Map[scala.reflect.io.AbstractFile, global.Tree]()
+  val fileToAfterParserSource = scala.collection.mutable.Map[scala.reflect.io.AbstractFile, Array[Char]]()
+  
   override def processOptions(options: List[String], error: String => Unit) {
     for (option <- options) {
       if (option.startsWith(baseDirectoryOpt)) {
@@ -107,7 +110,7 @@ class SRewritePlugin(val global: Global) extends Plugin {
 //        }
       }
     } catch {
-      case e @ _ => println("Error during processing unit: " + unit)
+      case e : Throwable => println("Error during processing unit: " + unit)
       throw e
     }
   }
@@ -133,12 +136,52 @@ class SRewritePlugin(val global: Global) extends Plugin {
             //regenerate only scala files
             val fileName = unit.source.file.name
             if (fileName.endsWith(".scala")) {
-              val src: Array[Char] = unit.source.content
+              
+              fileToAfterParserTree.update(unit.source.file, unit.body/*.duplicate*/) // looks like duplicate does not copy position
+              fileToAfterParserSource.update(unit.source.file, unit.source.content)
               
               println("-- Source name: " + fileName + " --")
               
-              //val sourceCode = reconstructTree(unit.body)
-              val sourceCode = print6(unit.body, src)
+            } else
+              println("-- Source name: " + fileName + " is not processed")
+        } catch {
+          case e: Exception =>
+            e.printStackTrace()
+            throw e
+        }
+      }
+    }
+  }
+  
+  //Phase should be inserted between prevPhase and nextPhase
+  //but it possible that not right after prevPhase or not right before nextPhase
+  class AfterTyperPhaseComponent(val prevPhase: String, val nextPhase: String) extends PluginComponent {
+    val global: SRewritePlugin.this.global.type = SRewritePlugin.this.global
+
+    override val runsAfter = List[String](prevPhase)
+    override val runsBefore = List[String](nextPhase)
+
+    val phaseName = "printSourceAfter_" + prevPhase
+    def newPhase(_prev: Phase): StdPhase = new PrintPhase2(_prev)
+
+    class PrintPhase2(prev: Phase) extends StdPhase(prev) {
+      override def name = SRewritePlugin.this.name
+
+      def apply(unit: CompilationUnit) {
+        try {
+            //regenerate only scala files
+            val fileName = unit.source.file.name
+            if (fileName.endsWith(".scala")) {
+            
+              val tree = fileToAfterParserTree(unit.source.file)
+              val src: Array[Char] = fileToAfterParserSource(unit.source.file)
+              
+              println("-- Source name: " + fileName + " --")
+              
+              utils.compare2(tree, unit.body)
+              
+              //val sourceCode = utils.print6(tree, src)
+              val sourceCode = utils.print6(unit.body, src)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -150,6 +193,85 @@ class SRewritePlugin(val global: Global) extends Plugin {
         }
       }
     }
+  }
+
+  object utils {
+    
+    // returns a multi-map
+    def posMap(t: Tree): Map[Int, List[Tree]] = {
+      val l = t.children.collect(new PartialFunction[Tree, (Int, Tree)] { 
+        def apply(x: Tree) = (x.pos.start, x)
+        def isDefinedAt(x: Tree): Boolean = hasPos(x)
+      })
+      l.groupBy(p => p._1).map(p => (p._1, p._2.map(_._2)))
+    }
+    
+    def compare2(oldTree: Tree, newTree: Tree): Unit = {
+      //if (oldTree.getClass.getName != newTree.getClass.getName) reportReplacement(oldTree, newTree)
+      if (oldTree.id != newTree.id) reportReplacement(oldTree, newTree)
+      
+      (oldTree, newTree) match {
+        case (Apply(fun, args), Block(stat :: stats, expr)) => stat match {
+          case Apply(fun2, Apply(tupleConstr, args2) :: Nil) => 
+            if (tupleConstr.toString.contains("Tuple")) {
+              val n = Integer.parseInt(tupleConstr.toString.replaceFirst(".*Tuple", "").takeWhile(_.isDigit))
+              println(s"Autotupling of arity $n detected")
+            }
+          case _ => 
+        }
+        case _ =>
+      }
+      /*
+      Apply
+		foo(3, 4)
+		by 380 of type scala.reflect.internal.Trees$Block
+		{
+		  AutoTuplingTest.this.foo(scala.this.Tuple2.apply[Int, Int](3, 4));
+		  ()
+		}
+      */
+      
+      (oldTree, newTree) match {
+        case (Apply(func1, args1), Apply(func2, tupleConstr :: Nil)) => { 
+          // TODO check that func1 and func2 represent the same
+          val arity = args1.length
+          if (tupleConstr.toString.contains("Tuple" + arity)) {
+            println(s"Autotupling of arity $arity detected")
+          }
+        }
+        case _ =>
+      }
+      
+      /*
+      Replacement: 108 of type scala.reflect.internal.Trees$Apply
+	  fooo(4, 5, 6)
+      by 521 of type scala.reflect.internal.Trees$Apply
+      AutoTuplingTest.this.fooo(scala.this.Tuple3.apply[Int, Int, Int](4, 5, 6))
+      */
+      
+      val m1 = posMap(oldTree)
+      val m2 = posMap(newTree)
+      val common = (m1.keys.toSet intersect m2.keys.toSet).toList.sorted
+      for (pos <- common; t1 <- m1(pos); t2 <- m2(pos)) compare2(t1, t2)
+    }
+    
+    def compare(oldTree: Tree, newTree: Tree): Unit = {
+      if (oldTree.getClass.getName == newTree.getClass.getName && oldTree.children.length == newTree.children.length) {
+        for ((o, n) <- oldTree.children zip newTree.children) {
+          compare(o, n)
+        }
+      } else {
+        reportReplacement(oldTree, newTree)
+      }
+    }
+    
+    def reportReplacement(oldTree: Tree, newTree: Tree): Unit = {
+      println(s"\nReplacement: ${oldTree.id} of type ${oldTree.getClass.getName}")
+      println(oldTree)
+      println(s"by ${newTree.id} of type ${newTree.getClass.getName}")
+      println(newTree)
+      println()
+    }    
     
     def hasPos(tree: Tree): Boolean = try {
       tree.pos.start < tree.pos.end
@@ -209,7 +331,6 @@ class SRewritePlugin(val global: Global) extends Plugin {
         case e: OverlapException => "error"
       }
     }
-    
   }
 }
 
