@@ -8,7 +8,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.tools.nsc.Global
 
-class SnippetExtractor(val global: Global) {
+class SnippetExtractor(val global: Global) {/*
    import global._
     
    val printMultiline: Boolean = false
@@ -21,9 +21,9 @@ class SnippetExtractor(val global: Global) {
     //TODO maybe we need to pass this stack when explicitly run show inside print
     val contextStack = scala.collection.mutable.Stack[Tree]()
 
-    def printModifiers(tree: Tree, mods: Modifiers): Unit = printModifiers(tree, mods, false)
+    def printModifiers(tree: Tree, mods: Modifiers): String = printModifiers(tree, mods, false)
 
-    def printModifiers(tree: Tree, mods: Modifiers, isCtr: Boolean): Unit =
+    def printModifiers(tree: Tree, mods: Modifiers, isCtr: Boolean): String =
       if (getCurrentContext().isEmpty || modsAccepted)
         printFlags(mods.flags, "" + mods.privateWithin, isCtr)
       else
@@ -37,18 +37,21 @@ class SnippetExtractor(val global: Global) {
     def printFlags(flags: Long, privateWithin: String): Unit =
       printFlags(flags, privateWithin, false)
 
-    def printFlags(flags: Long, privateWithin: String, isCtr: Boolean) {
+    def printFlags(flags: Long, privateWithin: String, isCtr: Boolean): String = {
       val base = PROTECTED | OVERRIDE | PRIVATE | ABSTRACT | FINAL | SEALED | LAZY | LOCAL
       val mask = if (isCtr) base else base | IMPLICIT
 
       val s = flagsToString(flags & mask, privateWithin)
-      if (s != "") print(s + " ")
-      //case flag should be the last
-      val caseFlag = flagsToString(flags & CASE)
-      if (!caseFlag.isEmpty) print(caseFlag + " ")
-      //abs override flag should be the last
-      val absOverrideFlag = flagsToString(flags & ABSOVERRIDE)
-      if (!absOverrideFlag.isEmpty) print("abstract override ")
+      
+      {if (s != "") (s + " ") else ""} + {
+        //case flag should be the last
+        val caseFlag = flagsToString(flags & CASE)
+        if (!caseFlag.isEmpty) caseFlag + " " else "" 
+      } + {
+        //abs override flag should be the last
+        val absOverrideFlag = flagsToString(flags & ABSOVERRIDE)
+        if (!absOverrideFlag.isEmpty) "abstract override " else ""
+      }
     }
 
     def printConstrParams(ts: List[ValDef], isConstr: Boolean) {
@@ -103,16 +106,18 @@ class SnippetExtractor(val global: Global) {
       printParam(tree, false)
     }
 
-    def printAnnotations(tree: Tree) {
+    def printAnnotations(tree: Tree): String = "/*annotations???*/" /*{
       val annots = tree.asInstanceOf[MemberDef].mods.annotations
-      annots foreach {
-        case Apply(Select(New(tree), p), args) => val ap = Apply(tree, args)
-          print("@", ap, " ")
-        case ann => print("@" + ann + " ")
-      }
-    }
+      (for (a <- annots) yield a match {
+        case Apply(Select(New(tree), p), args) => {
+          val ap = Apply(tree, args)
+          "@" + ap + " " // TODO ap is a tree, don't print it
+        }
+        case ann => "@" + ann + " "
+      }).mkString
+    }*/
 
-    def printTypeParams(ts: List[TypeDef]) {
+    def printTypeParams(ts: List[TypeDef]): String = {
       if (!ts.isEmpty) {
         print("["); printSeq(ts){ t =>
           printAnnotations(t)
@@ -205,11 +210,10 @@ class SnippetExtractor(val global: Global) {
       else from + "=>" + quotedName(s.rename)
     }
 
-    def printTree(tree: Tree) {
-      tree match {
+  def printTree(tree: Tree): Seq[String] = {
+    tree match {
         case ClassDef(mods, name, tparams, impl) =>
           contextManaged(tree){
-            printAnnotations(tree)
             val word =
               if (mods.isTrait){
                 printModifiers(tree, mods &~ ABSTRACT) // avoid abstract modifier for traits
@@ -219,6 +223,7 @@ class SnippetExtractor(val global: Global) {
                 "class"
               }
 
+            // printAnnotations(tree) // TODO
             print(word, " ", symbName(tree, name))
             printTypeParams(tparams)
 
@@ -692,9 +697,9 @@ class SnippetExtractor(val global: Global) {
         case tree => super_printTree(tree)
       }
       //TODO remove
-      if (printTypes && tree.isTerm && !tree.isEmpty) {
+      /*if (printTypes && tree.isTerm && !tree.isEmpty) {
         print("{", if (tree.tpe eq null) "<null>" else tree.tpe.toString, "}")
-      }
+      }*/
     }
 
     //Danger: it's overwritten method - can be problems with inheritance)
@@ -712,22 +717,21 @@ class SnippetExtractor(val global: Global) {
     val opSym = List('~', '=', '<', '>', '!', '#', '%', '^', '&', '|', '*', '/', '+', '-', ':', '\\', '?', '@')
     val excList = List("\\", "_*")
 
-    def print(args: Any*): Unit = {
-      args foreach {
-        arg =>
+    /*
+    def print(args: Any*): String = {
+      for (arg <- args) yield {
         //TODO repair issue with pattern matching, trees and vals of type Any
-          if (arg.isInstanceOf[Tree]) { //problem with vars of type Any
-          val treeArg = arg.asInstanceOf[Tree]
-            printTree(treeArg)
-          } else {
-            arg match {
-              case name: Name =>
+        if (arg.isInstanceOf[Tree]) { //problem with vars of type Any
+          /* we're not interested in this */
+        } else {
+          arg match {
+            case name: Name =>
                 print(quotedName(name))
               case other => /*TODO*/ //super.print(other)
             }
           }
       }
-    }
+    }*/
 
   // copied from Printers:
 
@@ -1071,5 +1075,5 @@ class SnippetExtractor(val global: Global) {
 
   protected var printTypes = false
   protected var printIds = false
-}
+*/}
 
