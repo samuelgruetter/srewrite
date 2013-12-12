@@ -6,25 +6,26 @@ import scala.reflect.internal._
 import scala.reflect.internal.util.{SourceFile, Statistics}
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
+import scala.tools.nsc.Global
 
 object Rewriter{
   private[Rewriter] trait PrinterDescriptor
   object AFTER_NAMER extends PrinterDescriptor
   object AFTER_TYPER extends PrinterDescriptor
 
-  def apply(compiler: Reflect) = {
+  def apply(glob: Global) = {
     new Rewriter {
-      val global = compiler
+      val global = glob
     }
   }
 
   type Reflect = SymbolTable
 }
 
-trait Rewriter {
+trait Rewriter extends CaseClassPrinter {
 
   import Rewriter.Reflect
-  val global: Reflect
+  val global: Global
   import global._
 
   //TODO set printMultiline for false
@@ -73,6 +74,68 @@ trait Rewriter {
       (for ((child, snippet) <- children zip snippets) yield child + snippet).mkString 
     }
     rec(tree)
+  }
+  
+  def show20(what: Tree): String = {
+    val sp = SnippetsPrinter2()
+    show20impl(what, sp)
+  }
+  
+  def show20impl(tree: Tree, sp: SnippetsPrinter2): String = {
+    def rec(tree: Tree): String = {
+      val children: List[String] = "" :: tree.children.map(rec(_))
+      val snippets = sp.snippets(tree)        
+      (for ((child, snippet) <- children zip snippets) yield child + snippet).mkString 
+    }
+    rec(tree)
+  }
+  
+  object SnippetsPrinter2 {
+    def apply(printMultiline: Boolean = false, decodeNames: Boolean = true): SnippetsPrinter2 = {
+      new SnippetsPrinter2(new StringWriter(), printMultiline, decodeNames)
+    }
+  }
+  
+  class SnippetsPrinter2(stringWriter: StringWriter, printMultiline: Boolean = false, decodeNames: Boolean = true) 
+    extends PrettyPrinter(new PrintWriter(stringWriter), printMultiline, decodeNames)
+  {
+    
+    private var snippetsBuf: ArrayBuffer[String] = null
+    
+    private def terminateSnippet(): Unit = {
+      out.flush()
+      snippetsBuf.append(stringWriter.toString)
+      stringWriter.getBuffer().setLength(0)
+     
+    }
+    
+    override def printTree(tree: Tree): Unit = {
+      terminateSnippet()
+      // and we ignore the child tree
+    }
+    
+    /** returns a Seq s of Strings s.t.
+     *  s(0) + tree.children(0) + s(1) + tree.children(1) + ... s(n-1) + tree.children(n-1) + s(n)
+     *  is a string representation of tree 
+     */
+    def snippets(tree: Tree): Seq[String] = {
+      snippetsBuf = new ArrayBuffer()
+      super.printTree(tree)
+      terminateSnippet()
+      val res = snippetsBuf.toSeq
+      snippetsBuf = null
+      check(tree, res)
+      res
+    }
+    
+    private def check(tree: Tree, res: Seq[String]): Unit = {
+      if (tree.children.length + 1 != res.length) {
+        scala.Console.println(s"\nSnippets length = ${res.length}, but #children = ${tree.children.length}")
+        scala.Console.println(res.map('"' + _ + '"'))
+        scala.Console.println(showCaseClass(tree))
+        scala.Console.println(tree)
+      }
+    }
   }
   
   class SnippetsPrinter(out: PrintWriter, printMultiline: Boolean = false, decodeNames: Boolean = true) 
@@ -160,9 +223,14 @@ trait Rewriter {
     !Option(name1).isEmpty && !Option(name2).isEmpty && (name1.toString.trim == name2.toString.trim)
 
   //TODO change printMultiline (introduce class for settings) - to pass all parameters
-  class PrettyPrinter(out: PrintWriter, printMultiline: Boolean = false, decodeNames: Boolean = true) extends global.TreePrinter(out) {
+  class PrettyPrinter(val out: PrintWriter, printMultiline: Boolean = false, decodeNames: Boolean = true) extends global.TreePrinter(out) {
     //TODO maybe we need to pass this stack when explicitly run show inside print
     val contextStack = scala.collection.mutable.Stack[Tree]()
+    
+    def enclosingClass: ClassDef = {
+      // iterator is in LIFO order
+      contextStack.dropWhile(! _.isInstanceOf[ClassDef]).head.asInstanceOf[ClassDef]
+    }
 
     override def printModifiers(tree: Tree, mods: Modifiers): Unit = printModifiers(tree, mods, false)
 
@@ -296,8 +364,9 @@ trait Rewriter {
       decodeNames && qualIsIntLit && name.isOperatorName
     }
 
+    // Must not use backQuotedPath, because it turns Trees into strings without using the printer!
     //Danger while using inheritance: it's hidden (overwritten) method
-    def backquotedPath(t: Tree): String = {
+    def backquotedPathOriginal(t: Tree): String = {
       t match {
         case Select(qual, name) if (name.isTermName && specialTreeContext(qual)(iLabelDef = false)) || isIntLitWithDecodedOp(qual, name) => "(%s).%s".format(backquotedPath(qual), symbName(t, name))
         case Select(qual, name) if name.isTermName  => "%s.%s".format(backquotedPath(qual), symbName(t, name))
@@ -306,6 +375,30 @@ trait Rewriter {
         case _                                      =>
           val typeOfPrinter = if (this.isInstanceOf[AfterTyperPrinter]) Rewriter.AFTER_TYPER else Rewriter.AFTER_NAMER
             show(t, typeOfPrinter, printMultiline, decodeNames)
+      }
+    }
+    
+    def printBackQuotedPath(t: Tree): Unit = {
+      t match {
+        case Select(qual, name) if (name.isTermName && specialTreeContext(qual)(iLabelDef = false)) || isIntLitWithDecodedOp(qual, name) => {
+          print("(")
+          printBackQuotedPath(qual)
+          print(").")
+          print(symbName(t, name))
+        }
+        case Select(qual, name) if name.isTermName  => {
+          printBackQuotedPath(qual)
+          print(".")
+          print(symbName(t, name))
+        }
+        case Select(qual, name) if name.isTypeName  => {
+          printBackQuotedPath(qual)
+          print("#")
+          print(symbName(t, name))
+        }
+        case _ => {
+          printTree(t)
+        }
       }
     }
 
@@ -351,7 +444,7 @@ trait Rewriter {
     }
 
     override def printTree(tree: Tree) {
-      tree match {
+      tree match {        
         case ClassDef(mods, name, tparams, impl) =>
           contextManaged(tree){
             printAnnotations(tree)
@@ -427,6 +520,7 @@ trait Rewriter {
           contextManaged(tree){
             packaged match {
               case Ident(name) if compareNames(name, nme.EMPTY_PACKAGE_NAME) =>
+                print(EmptyTree) // instead of Ident(emptyPackageName), for snippets extractor
                 printSeq(stats) {
                   print(_)
                 } {
@@ -435,7 +529,7 @@ trait Rewriter {
                 };
               case _ =>
                 printAnnotations(tree)
-                print("/*after-namer-package:*/ package ", packaged);
+                print("package ", packaged);
                 printColumn(stats, " {", "\n", "}")
             }
           }
@@ -529,7 +623,9 @@ trait Rewriter {
           }
 
         case Import(expr, selectors) =>
-          print("import ", backquotedPath(expr), ".")
+          print("import ")
+          printBackQuotedPath(expr)
+          print(".")
           selectors match {
             case List(s) =>
               // If there is just one selector and it is not remapping a name, no braces are needed
@@ -594,6 +690,11 @@ trait Rewriter {
             if (!traits.isEmpty) {
               printRow(traits, " with ", " with ", "")
             }
+          } else {
+            // if no parents are printed, let the snippet extractor know that a new snippet begins,
+            // and also put some space, s.t. if someone using the snippet extractor's results
+            // sill wants to print scala.AnyRef as parent, we have space between class name and scala.AnyRef
+            print(" ", EmptyTree)
           }
           //remove primary constr def and constr val and var defs
           //right contains all constructors
@@ -745,8 +846,16 @@ trait Rewriter {
 
         case Select(qualifier, name) => {
           val printParantheses = specialTreeContext(qualifier)(iAnnotated = false) || isIntLitWithDecodedOp(qualifier, name)
-          if (printParantheses) print("(", backquotedPath(qualifier), ").", symbName(tree, name))
-          else print(backquotedPath(qualifier), ".", symbName(tree, name))
+          if (printParantheses) {
+            print("(")
+            printBackQuotedPath(qualifier)
+            print(").")
+            print(symbName(tree, name))
+          } else {
+            printBackQuotedPath(qualifier)
+            print(".")
+            print(symbName(tree, name))
+          }
         }
 
         case id@Ident(name) =>
@@ -875,7 +984,7 @@ trait Rewriter {
     }
   }
 
-  class AfterTyperPrinter(out: PrintWriter, printMultiline: Boolean = false, decodeNames: Boolean = false) extends PrettyPrinter(out, printMultiline, decodeNames) {
+  class AfterTyperPrinter(out: PrintWriter, printMultiline: Boolean = false, decodeNames: Boolean = false) extends PrettyPrinter(out, printMultiline, decodeNames) {/*
 
     private val curClassOrModuleStack: mutable.Stack[Symbol] = mutable.Stack()
     private def pushClassOrModule(sym: Symbol) = curClassOrModuleStack.push(sym)
@@ -1396,5 +1505,5 @@ trait Rewriter {
         case _ =>
           tree
     }
-  }
+  */}
 }

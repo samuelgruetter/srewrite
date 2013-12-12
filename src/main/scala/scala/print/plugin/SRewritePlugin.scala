@@ -186,7 +186,8 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
               utils.compare3(tree, unit.body)
               
               //val sourceCode = utils.print6(tree, src)
-              val sourceCode = utils.print6(unit.body, src)
+              //val sourceCode = utils.print6(unit.body, src)
+              val sourceCode = utils.print7(tree) // print7 only possible with before-typer-tree
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -342,6 +343,11 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
     }
 
     class OverlapException extends Exception
+    
+    def print7(tree: Tree): String = {
+      val r = Rewriter(global)
+      r.show20(tree.asInstanceOf[r.global.Tree])
+    }
     
     def print6(tree: Tree, source: Array[Char]): String = {
       def sourceStr(from: Int, to: Int) = {
