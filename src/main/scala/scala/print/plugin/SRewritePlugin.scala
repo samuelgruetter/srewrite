@@ -8,6 +8,7 @@ import nsc.plugins.PluginComponent
 import scala.tools.nsc.ast.Printers
 import java.io.{StringWriter, PrintWriter, File}
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.{MultiMap, HashMap, Set}
 
 object SRewritePlugin {
   val baseDirectoryOpt = "base-dir:"
@@ -15,7 +16,7 @@ object SRewritePlugin {
   val overSrcOpt = "oversrc"
 }
 
-class SRewritePlugin(val global: Global) extends Plugin {
+class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
   import SRewritePlugin._
   import global._
 
@@ -176,9 +177,13 @@ class SRewritePlugin(val global: Global) extends Plugin {
               val tree = fileToAfterParserTree(unit.source.file)
               val src: Array[Char] = fileToAfterParserSource(unit.source.file)
               
+              // release stuff:
+              fileToAfterParserTree.remove(unit.source.file)
+              fileToAfterParserSource.remove(unit.source.file)
+              
               println("-- Source name: " + fileName + " --")
               
-              utils.compare2(tree, unit.body)
+              utils.compare3(tree, unit.body)
               
               //val sourceCode = utils.print6(tree, src)
               val sourceCode = utils.print6(unit.body, src)
@@ -197,7 +202,56 @@ class SRewritePlugin(val global: Global) extends Plugin {
 
   object utils {
     
-    // returns a multi-map
+    
+    def traverse(tree: Tree)(action: Tree => Unit): Unit = {
+      action(tree)
+      tree.children.foreach(t => traverse(t)(action))
+    }
+    
+    def allPosMap(tree: Tree): MultiMap[Int, Tree] = {
+      val mm = new HashMap[Int, Set[Tree]] with MultiMap[Int, Tree]
+      traverse(tree){t => {if (hasPos(t)) mm.addBinding(t.pos.start, t)}}
+      mm
+    }
+    
+    def compare3(oldTree: Tree, newTree: Tree): Unit = {
+      val m1 = allPosMap(oldTree)
+      val m2 = allPosMap(newTree)
+      val common = (m1.keys.toSet intersect m2.keys.toSet).toList.sorted
+      for (pos <- common; t1 <- m1(pos); t2 <- m2(pos)) compareOne(t1, t2)
+    }
+    
+    // no recursion
+    def compareOne(oldTree: Tree, newTree: Tree): Unit = {
+      
+      (oldTree, newTree) match {
+        // unit might be a BoxedUnit, so we check using toString
+        case (Apply(func1, Nil), Apply(func2, Literal(Constant(unit)) :: Nil)) if unit.toString == "()" => {
+          // TODO check that func1 and func2 represent the same
+          reportReplacement(oldTree, newTree)
+          println(s">>> Autotupling of arity 0 detected\n")
+        }
+        case (Apply(func1, args1), Apply(func2, tupleConstr :: Nil)) => { 
+          // TODO check that func1 and func2 represent the same
+          val arity = args1.length
+          if (tupleConstr.toString.contains("Tuple" + arity)) {
+            reportReplacement(oldTree, newTree)
+            println(s">>> Autotupling of arity $arity detected\n")
+          }
+        }
+        case _ =>
+      }
+      
+      /*
+       * Replacement: #91: Apply(Ident())
+       * f()
+       * by #489: Apply(Select(This()), Literal())
+       * AutoTuplingTest.this.f(())
+       * 
+       */
+    }
+    
+    // returns a multi-map (pos -> list of all *direct* children with this pos)
     def posMap(t: Tree): Map[Int, List[Tree]] = {
       val l = t.children.collect(new PartialFunction[Tree, (Int, Tree)] { 
         def apply(x: Tree) = (x.pos.start, x)
@@ -208,14 +262,14 @@ class SRewritePlugin(val global: Global) extends Plugin {
     
     def compare2(oldTree: Tree, newTree: Tree): Unit = {
       //if (oldTree.getClass.getName != newTree.getClass.getName) reportReplacement(oldTree, newTree)
-      if (oldTree.id != newTree.id) reportReplacement(oldTree, newTree)
+      /*if (oldTree.id != newTree.id)*/ reportReplacement(oldTree, newTree)
       
       (oldTree, newTree) match {
         case (Apply(fun, args), Block(stat :: stats, expr)) => stat match {
           case Apply(fun2, Apply(tupleConstr, args2) :: Nil) => 
             if (tupleConstr.toString.contains("Tuple")) {
               val n = Integer.parseInt(tupleConstr.toString.replaceFirst(".*Tuple", "").takeWhile(_.isDigit))
-              println(s"Autotupling of arity $n detected")
+              println(s">>> Autotupling of arity $n detected")
             }
           case _ => 
         }
@@ -236,7 +290,7 @@ class SRewritePlugin(val global: Global) extends Plugin {
           // TODO check that func1 and func2 represent the same
           val arity = args1.length
           if (tupleConstr.toString.contains("Tuple" + arity)) {
-            println(s"Autotupling of arity $arity detected")
+            println(s">>> Autotupling of arity $arity detected")
           }
         }
         case _ =>
@@ -266,12 +320,20 @@ class SRewritePlugin(val global: Global) extends Plugin {
     }
     
     def reportReplacement(oldTree: Tree, newTree: Tree): Unit = {
+      println(s"\nReplacement: #${oldTree.id}: ${showCaseClass(oldTree)}")
+      println(oldTree)
+      println(s"by #${newTree.id}: ${showCaseClass(newTree)}")
+      println(newTree)
+      println()
+    }
+    
+    def reportReplacement0(oldTree: Tree, newTree: Tree): Unit = {
       println(s"\nReplacement: ${oldTree.id} of type ${oldTree.getClass.getName}")
       println(oldTree)
       println(s"by ${newTree.id} of type ${newTree.getClass.getName}")
       println(newTree)
       println()
-    }    
+    }
     
     def hasPos(tree: Tree): Boolean = try {
       tree.pos.start < tree.pos.end
@@ -283,7 +345,7 @@ class SRewritePlugin(val global: Global) extends Plugin {
     
     def print6(tree: Tree, source: Array[Char]): String = {
       def sourceStr(from: Int, to: Int) = {
-        println(s"${source.length}/$from/$to")
+        //println(s"${source.length}/$from/$to")
         String.valueOf(source, from, to-from)
       }
       
