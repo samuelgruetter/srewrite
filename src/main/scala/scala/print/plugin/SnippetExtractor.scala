@@ -8,7 +8,7 @@ import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.tools.nsc.Global
 
-class SnippetExtractor(val global: Global) {/*
+class SnippetExtractor(val global: Global) {
    import global._
     
    val printMultiline: Boolean = false
@@ -21,9 +21,9 @@ class SnippetExtractor(val global: Global) {/*
     //TODO maybe we need to pass this stack when explicitly run show inside print
     val contextStack = scala.collection.mutable.Stack[Tree]()
 
-    def printModifiers(tree: Tree, mods: Modifiers): String = printModifiers(tree, mods, false)
+    def printModifiers(tree: Tree, mods: Modifiers): Unit = printModifiers(tree, mods, false)
 
-    def printModifiers(tree: Tree, mods: Modifiers, isCtr: Boolean): String =
+    def printModifiers(tree: Tree, mods: Modifiers, isCtr: Boolean): Unit =
       if (getCurrentContext().isEmpty || modsAccepted)
         printFlags(mods.flags, "" + mods.privateWithin, isCtr)
       else
@@ -117,7 +117,7 @@ class SnippetExtractor(val global: Global) {/*
       }).mkString
     }*/
 
-    def printTypeParams(ts: List[TypeDef]): String = {
+    def printTypeParams(ts: List[TypeDef]): Unit = {
       if (!ts.isEmpty) {
         print("["); printSeq(ts){ t =>
           printAnnotations(t)
@@ -169,7 +169,7 @@ class SnippetExtractor(val global: Global) {/*
       }
     }
 
-    def contextManaged(context: Tree)(body: =>Unit) {
+    def contextManaged0(context: Tree)(body: =>Unit) {
       contextStack.push(context)
       body
       contextStack.pop()
@@ -210,10 +210,10 @@ class SnippetExtractor(val global: Global) {/*
       else from + "=>" + quotedName(s.rename)
     }
 
-  def printTree(tree: Tree): Seq[String] = {
+    
+  def printTree(tree: Tree): Unit = {
     tree match {
         case ClassDef(mods, name, tparams, impl) =>
-          contextManaged(tree){
             val word =
               if (mods.isTrait){
                 printModifiers(tree, mods &~ ABSTRACT) // avoid abstract modifier for traits
@@ -281,10 +281,8 @@ class SnippetExtractor(val global: Global) {/*
 
             print(if (mods.isDeferred) "<: " else if (!printedParents.isEmpty) " extends "
               else "", impl)
-          }
 
         case PackageDef(packaged, stats) =>
-          contextManaged(tree){
             packaged match {
               case Ident(name) if compareNames(name, nme.EMPTY_PACKAGE_NAME) =>
                 printSeq(stats) {
@@ -298,16 +296,13 @@ class SnippetExtractor(val global: Global) {/*
                 print("/*after-namer-package:*/ package ", packaged);
                 printColumn(stats, " {", "\n", "}")
             }
-          }
 
         case ModuleDef(mods, name, impl) =>
-          contextManaged(tree){
             printAnnotations(tree)
             printModifiers(tree, mods);
             val Template(parents @ List(_*), self, methods) = impl
             val parentsWAnyRef = removeDefaultClassesFromList(parents, List("AnyRef"))
             print("object " + symbName(tree, name), if (!parentsWAnyRef.isEmpty) " extends " else "", impl)
-          }
 
         case vd@ValDef(mods, name, tp, rhs) =>
           printAnnotations(tree)
@@ -324,10 +319,8 @@ class SnippetExtractor(val global: Global) {/*
             ": ",
             tp
           )
-          contextManaged(tree){
-            if (!mods.isDeferred)
-              print(" = ", if (rhs.isEmpty) "_" else rhs)
-          }
+          if (!mods.isDeferred)
+            print(" = ", if (rhs.isEmpty) "_" else rhs)
 
         case dd@DefDef(mods, name, tparams, vparamss, tp, rhs) =>
           printAnnotations(tree)
@@ -346,9 +339,7 @@ class SnippetExtractor(val global: Global) {/*
             ": ",
             tp
           )
-          contextManaged(tree){
-            printOpt(" = " + (if (mods.hasFlag(MACRO)) "macro " else ""), rhs)
-          }
+          printOpt(" = " + (if (mods.hasFlag(MACRO)) "macro " else ""), rhs)
 
         case td@TypeDef(mods, name, tparams, rhs) =>
           if (mods hasFlag (PARAM | DEFERRED)) {
@@ -360,32 +351,24 @@ class SnippetExtractor(val global: Global) {/*
             printAnnotations(tree)
             printModifiers(tree, mods);
             print("type " + symbName(tree, name))
-            printTypeParams(tparams);
-            contextManaged(tree){
-              printOpt(" = ", rhs)
-            }
+            printTypeParams(tparams)
+            printOpt(" = ", rhs)
           }
 
         case LabelDef(name, params, rhs) =>
           if (name.contains("while$")) {
-            contextManaged(tree){
               val If(cond, thenp, elsep) = rhs
               print("while (", cond, ") ")
               val Block(list, wh) = thenp
               printColumn(list, "", ";", "")
-            }
           } else if (name.contains("doWhile$")) {
-            contextManaged(tree){
               val Block(bodyList: List[Tree], ifCond @ If(cond, thenp, elsep)) = rhs
               print("do ")
               printColumn(bodyList, "", ";", "")
               print(" while (", cond, ") ")
-            }
           } else {
             print(symbName(tree, name)); printLabelParams(params);
-            contextManaged(tree){
-              printBlock(rhs)
-            }
+            printBlock(rhs)
           }
 
         case Import(expr, selectors) =>
@@ -485,15 +468,11 @@ class SnippetExtractor(val global: Global) {/*
             } else {
               print(" {")
             }
-            contextManaged(tree) {
-              printColumn(modBody, "", ";", "}")
-            }
+            printColumn(modBody, "", ";", "}")
           }
 
         case Block(stats, expr) =>
-          contextManaged(tree){
             printColumn(stats ::: List(expr), "{", ";", "}")
-          }
 
         case Match(selector, cases) =>
           //insert braces if match is inner
@@ -515,11 +494,9 @@ class SnippetExtractor(val global: Global) {/*
               printColumn(cases, "{", "", "}")
             case _ =>
               insertBraces {
-                contextManaged(tree){
                   codeInParantheses(printParantheses) {
                     print(selector);
                   }
-                }
                 printColumn(cases, " match {", "", "}")
               }
           }
@@ -533,9 +510,7 @@ class SnippetExtractor(val global: Global) {/*
 
           print(pat);
           printOpt(" if ", guard)
-          contextManaged(tree) {
-            print(" => ", body)
-          }
+          print(" => ", body)
 
         case Star(elem) =>
           print(elem, "*")
@@ -649,9 +624,7 @@ class SnippetExtractor(val global: Global) {/*
           print("(", qualifier, ")#", symbName(tree, selector))
 
         case CompoundTypeTree(templ) =>
-          contextManaged(tree){
             print(templ)
-          }
 
         case AppliedTypeTree(tp, args) =>
           //it's possible to have (=> String) => String type but Function1[=> String, String] is not correct
@@ -701,37 +674,58 @@ class SnippetExtractor(val global: Global) {/*
         print("{", if (tree.tpe eq null) "<null>" else tree.tpe.toString, "}")
       }*/
     }
+  
 
-    //Danger: it's overwritten method - can be problems with inheritance)
-    def symbName(tree: Tree, name: Name, decoded: Boolean = decodeNames) = {
-      val encName = name.encoded
-      val decName = name.decoded
-      def modifyEncoded(s: String) = if (decoded && (encName.contains("$u") ||
-        (encName.contains("$") && decName.exists(ch => opSym.contains(ch)) && decName.exists(ch => !opSym.contains(ch)) && !excList.exists(str => decName.contains(str)))))
-        "`%s`" format s else s
-
-      if (compareNames(name, nme.CONSTRUCTOR)) "this"
-      else modifyEncoded(quotedName(name, decoded))
+  def patternMatchTemplate(tree: Tree): Unit = {
+    tree match {
+      case ClassDef(mods, name, tparams, impl) =>
+      case PackageDef(packaged, stats) =>
+      case ModuleDef(mods, name, impl) =>
+      case vd @ ValDef(mods, name, tp, rhs) =>
+      case dd @ DefDef(mods, name, tparams, vparamss, tp, rhs) =>
+      case td @ TypeDef(mods, name, tparams, rhs) =>
+      case LabelDef(name, params, rhs) =>
+      case Import(expr, selectors) =>
+      case Template(parents, self, body) =>
+      case Block(stats, expr) =>
+      case Match(selector, cases) =>
+      case CaseDef(pat, guard, body) =>
+      case Star(elem) =>
+      case Bind(name, t) =>
+      case Function(vparams, body) =>
+      case Typed(expr, tp) =>
+      case Apply(fun, vargs) =>
+      case Super(This(qual), mix) =>
+      case This(qual) =>
+      case Select(qual @ New(tpe), name) =>
+      case Select(qualifier, name) => 
+      case id @ Ident(name) =>
+      case l @ Literal(x) =>
+      case Annotated(Apply(Select(New(tpt), nme.CONSTRUCTOR), args), tree) =>
+      case SelectFromTypeTree(qualifier, selector) =>
+      case CompoundTypeTree(templ) =>
+      case AppliedTypeTree(tp, args) =>
+      case ExistentialTypeTree(tpt, whereClauses) =>
+      case tbt @ TypeBoundsTree(lo, hi) => 
+      case emptyTree if emptyTree.toString == "<empty>" => // workaround as case EmptyTree does not work for all universes because of path depedent types
+      case tree => super_printTree(tree)
     }
+  }
 
-    val opSym = List('~', '=', '<', '>', '!', '#', '%', '^', '&', '|', '*', '/', '+', '-', ':', '\\', '?', '@')
-    val excList = List("\\", "_*")
+  //Danger: it's overwritten method - can be problems with inheritance)
+  def symbName(tree: Tree, name: Name, decoded: Boolean = decodeNames) = {
+    val encName = name.encoded
+    val decName = name.decoded
+    def modifyEncoded(s: String) = if (decoded && (encName.contains("$u") ||
+      (encName.contains("$") && decName.exists(ch => opSym.contains(ch)) && decName.exists(ch => !opSym.contains(ch)) && !excList.exists(str => decName.contains(str)))))
+      "`%s`" format s else s
 
-    /*
-    def print(args: Any*): String = {
-      for (arg <- args) yield {
-        //TODO repair issue with pattern matching, trees and vals of type Any
-        if (arg.isInstanceOf[Tree]) { //problem with vars of type Any
-          /* we're not interested in this */
-        } else {
-          arg match {
-            case name: Name =>
-                print(quotedName(name))
-              case other => /*TODO*/ //super.print(other)
-            }
-          }
-      }
-    }*/
+    if (compareNames(name, nme.CONSTRUCTOR)) "this"
+    else modifyEncoded(quotedName(name, decoded))
+  }
+
+  val opSym = List('~', '=', '<', '>', '!', '#', '%', '^', '&', '|', '*', '/', '+', '-', ':', '\\', '?', '@')
+  val excList = List("\\", "_*")
 
   // copied from Printers:
 
@@ -1075,5 +1069,5 @@ class SnippetExtractor(val global: Global) {/*
 
   protected var printTypes = false
   protected var printIds = false
-*/}
+}
 
