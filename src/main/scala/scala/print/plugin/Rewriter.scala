@@ -7,6 +7,7 @@ import scala.reflect.internal.util.{SourceFile, Statistics}
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.tools.nsc.Global
+import java.io.OutputStreamWriter
 
 object Rewriter{
   private[Rewriter] trait PrinterDescriptor
@@ -78,16 +79,30 @@ trait Rewriter extends CaseClassPrinter {
   
   def show20(what: Tree): String = {
     val sp = SnippetsPrinter2()
-    show20impl(what, sp)
+    val cp = ChildrenPrinter()
+    show20impl(what, sp, cp)
   }
   
-  def show20impl(tree: Tree, sp: SnippetsPrinter2): String = {
+  def show20impl(tree: Tree, sp: SnippetsPrinter2, cp: ChildrenPrinter): String = {
     def rec(tree: Tree): String = {
-      val children: List[String] = "" :: tree.children.map(rec(_))
-      val snippets = sp.snippets(tree)        
-      (for ((child, snippet) <- children zip snippets) yield child + snippet).mkString 
+      val childrenTrees: Seq[Tree] = cp.children(tree)
+      val children: Seq[String] = Seq("") ++ childrenTrees.map(rec(_))
+      val snippets = sp.snippets(tree)
+      check(tree, childrenTrees, snippets)
+      //(for ((child, snippet) <- children zip snippets) yield child + snippet).mkString 
+      (for (((child, i), snippet) <- children.zipWithIndex zip snippets) yield
+          if (i == 0) snippet else s"/*<$i*/$child/*$i>*/$snippet").mkString
     }
     rec(tree)
+  }
+
+  def check(tree: Tree, children: Seq[Tree], snippets: Seq[String]): Unit = {
+    if (children.length + 1 != snippets.length) {
+      println(s"\nSnippets length = ${snippets.length}, but #children = ${children.length}")
+      println(snippets.map('"' + _.replaceAll("\\n", "\\\\n") + '"'))
+      println(children.map(_.getClass().getName()))
+      println(tree)
+    }
   }
   
   object SnippetsPrinter2 {
@@ -115,26 +130,44 @@ trait Rewriter extends CaseClassPrinter {
     }
     
     /** returns a Seq s of Strings s.t.
-     *  s(0) + tree.children(0) + s(1) + tree.children(1) + ... s(n-1) + tree.children(n-1) + s(n)
-     *  is a string representation of tree 
+     *  s(0) + cp.children(tree)(0) + s(1) + cp.children(tree)(1) + ... s(n-1) + cp.children(tree)(n-1) + s(n)
+     *  is a string representation of tree
+     *  cp being a ChildrenPrinter 
      */
     def snippets(tree: Tree): Seq[String] = {
       snippetsBuf = new ArrayBuffer()
+      
+      // Problem: if tree is a Template, we would need to have its enclosing class on the contextStack!
       super.printTree(tree)
+      
       terminateSnippet()
       val res = snippetsBuf.toSeq
       snippetsBuf = null
-      check(tree, res)
       res
+    }    
+  }
+  
+  object ChildrenPrinter {
+    def apply(printMultiline: Boolean = false, decodeNames: Boolean = true): ChildrenPrinter = {
+      new ChildrenPrinter(printMultiline, decodeNames)
+    }
+  }
+  
+  class ChildrenPrinter(printMultiline: Boolean = false, decodeNames: Boolean = true) 
+    extends PrettyPrinter(new PrintWriter(new OutputStreamWriter(new NullOutputStream())), printMultiline, decodeNames)
+  {
+    private var childrenBuf: ArrayBuffer[Tree] = null
+    
+    override def printTree(tree: Tree): Unit = {
+      childrenBuf.append(tree)
     }
     
-    private def check(tree: Tree, res: Seq[String]): Unit = {
-      if (tree.children.length + 1 != res.length) {
-        scala.Console.println(s"\nSnippets length = ${res.length}, but #children = ${tree.children.length}")
-        scala.Console.println(res.map('"' + _ + '"'))
-        scala.Console.println(showCaseClass(tree))
-        scala.Console.println(tree)
-      }
+    def children(tree: Tree): Seq[Tree] = {
+      childrenBuf = new ArrayBuffer()
+      super.printTree(tree)
+      val res = childrenBuf.toSeq
+      childrenBuf = null
+      res
     }
   }
   
@@ -225,30 +258,35 @@ trait Rewriter extends CaseClassPrinter {
   //TODO change printMultiline (introduce class for settings) - to pass all parameters
   class PrettyPrinter(val out: PrintWriter, printMultiline: Boolean = false, decodeNames: Boolean = true) extends global.TreePrinter(out) {
     //TODO maybe we need to pass this stack when explicitly run show inside print
-    val contextStack = scala.collection.mutable.Stack[Tree]()
+    // val contextStack = scala.collection.mutable.Stack[Tree]()
     
+    /*
     def enclosingClass: ClassDef = {
       // iterator is in LIFO order
       contextStack.dropWhile(! _.isInstanceOf[ClassDef]).head.asInstanceOf[ClassDef]
     }
+    */
 
-    override def printModifiers(tree: Tree, mods: Modifiers): Unit = printModifiers(tree, mods, false)
+    override def printModifiers(tree: Tree, mods: Modifiers): Unit = {
+      scala.Console.println("oops, I don't know the current context")
+      printModifiers(tree, mods, false, None)
+    }
 
-    def printModifiers(tree: Tree, mods: Modifiers, isCtr: Boolean): Unit =
-      if (getCurrentContext().isEmpty || modsAccepted)
-        printFlags(mods.flags, "" + mods.privateWithin, isCtr)
+    def printModifiers(tree: Tree, mods: Modifiers, isCtr: Boolean, currentContext: Option[ClassDef]): Unit =
+      if (currentContext.isEmpty || modsAccepted(currentContext))
+        printFlags(mods.flags, "" + mods.privateWithin, isCtr, currentContext)
       else
-        List(IMPLICIT, CASE, LAZY).foreach{flag => if(mods.hasFlag(flag))  printFlags(flag, "", isCtr)}
+        List(IMPLICIT, CASE, LAZY).foreach{flag => if(mods.hasFlag(flag))  printFlags(flag, "", isCtr, currentContext)}
 
-    def modsAccepted = getCurrentContext() map {
+    def modsAccepted(currentContext: Option[Tree]) = currentContext map {
       case _:ClassDef | _:ModuleDef | _:Template | _:PackageDef => true
       case _ => false
     } getOrElse false
 
     override def printFlags(flags: Long, privateWithin: String) =
-      printFlags(flags, privateWithin, false)
+      printFlags(flags, privateWithin, false, None)
 
-    def printFlags(flags: Long, privateWithin: String, isCtr: Boolean) {
+    def printFlags(flags: Long, privateWithin: String, isCtr: Boolean, currentContext: Option[ClassDef]) {
       val base = PROTECTED | OVERRIDE | PRIVATE | ABSTRACT | FINAL | SEALED | LAZY | LOCAL
       val mask = if (isCtr) base else base | IMPLICIT
 
@@ -262,11 +300,11 @@ trait Rewriter extends CaseClassPrinter {
       if (!absOverrideFlag.isEmpty) print("abstract override ")
     }
 
-    def printConstrParams(ts: List[ValDef], isConstr: Boolean) {
+    def printConstrParams(ts: List[ValDef], isConstr: Boolean, currentContext: Option[ClassDef]) {
       codeInParantheses(){
         if (!ts.isEmpty) printFlags(ts.head.mods.flags & IMPLICIT, "")
         printSeq(ts) {
-          printParam(_, true)
+          printParam(_, true, currentContext)
         } { print(", ") }
       }
     }
@@ -294,13 +332,13 @@ trait Rewriter extends CaseClassPrinter {
       }
     }
 
-    def printParam(tree: Tree, isConstr: Boolean) {
+    def printParam(tree: Tree, isConstr: Boolean, currentContext: Option[ClassDef]) {
       tree match {
         case ValDef(mods, name, tp, rhs) =>
 //          printPosition(tree)
           printAnnotations(tree)
           if (isConstr) {
-            printModifiers(tree, mods, isConstr)
+            printModifiers(tree, mods, isConstr, currentContext)
           }
           print(if (mods.isMutable && isConstr) "var " else if (isConstr) "val " else "", symbName(tree, name));
           if (name.endsWith("_")) print(" ");
@@ -311,7 +349,7 @@ trait Rewriter extends CaseClassPrinter {
     }
 
     override def printParam(tree: Tree) {
-      printParam(tree, false)
+      printParam(tree, false, None) // no class context!
     }
 
     override def printAnnotations(tree: Tree) {
@@ -403,12 +441,12 @@ trait Rewriter extends CaseClassPrinter {
     }
 
     def contextManaged(context: Tree)(body: =>Unit) {
-      contextStack.push(context)
+      // contextStack.push(context)
       body
-      contextStack.pop()
+      // contextStack.pop()
     }
 
-    def getCurrentContext() = if (!contextStack.isEmpty) Some(contextStack.top) else None
+    // def getCurrentContext() = if (!contextStack.isEmpty) Some(contextStack.top) else None
 
     def removeDefaultTypesFromList(trees: List[Tree])(classesToRemove: List[String])(traitsToRemove: List[String]) =
       removeDefaultTraitsFromList(removeDefaultClassesFromList(trees, classesToRemove), traitsToRemove)
@@ -442,10 +480,107 @@ trait Rewriter extends CaseClassPrinter {
       if (isNotRemap(s)) from
       else from + "=>" + quotedName(s.rename)
     }
+    
+    def printTemplate(tree: Template, currentContext: Option[Tree]): Unit = {
+      val Template(parents, self, body) = tree
+
+          val printedParents =
+            currentContext map {
+              //val example: Option[AnyRef => Product1[Any] with AnyRef] = ... - CompoundTypeTree with template
+              case _: CompoundTypeTree => parents
+              case ClassDef(mods, name, _, _) if mods.hasFlag(CASE) => removeDefaultTypesFromList(parents)(List("AnyRef"))(List("Product", "Serializable"))
+              case _ => removeDefaultClassesFromList(parents, List("AnyRef"))
+            } getOrElse(parents)
+
+          val primaryCtrOpt = getPrimaryConstr(body)
+          var ap: Option[Apply] = None
+
+          for (primaryCtr <- primaryCtrOpt) {
+            primaryCtr match {
+              case DefDef(_, _, _, _, _, Block(ctBody @ List(_*), _)) =>
+                ap = ctBody collectFirst {
+                  case apply: Apply => apply
+                }
+
+                //vals in preinit blocks
+                val presuperVals = ctBody filter {
+                  case vd:ValDef => vd.mods.hasFlag(PRESUPER)
+                  case _ => false
+                }
+
+                if (!presuperVals.isEmpty) {
+                  print("{")
+                  printColumn(presuperVals, "", ";", "")
+                  print("} " + (if (!printedParents.isEmpty) "with " else ""))
+                }
+
+              case _ =>
+            }
+          }
+
+          if (!printedParents.isEmpty) {
+            val (clParent :: traits) = printedParents
+            print(clParent)
+
+            def getConstrParams(tree: Tree, cargs: List[List[Tree]]): List[List[Tree]] = {
+              tree match {
+                case Apply(inTree, args) =>
+                  getConstrParams(inTree, cargs):+args
+                case _ => cargs
+              }
+            }
+
+            val applyParamsList = ap map {getConstrParams(_, Nil)} getOrElse Nil
+            applyParamsList foreach {x: List[Tree] => if (!(x.isEmpty && applyParamsList.size == 1)) printRow(x, "(", ", ", ")")}
+
+            if (!traits.isEmpty) {
+              printRow(traits, " with ", " with ", "")
+            }
+          } else {
+            // if no parents are printed, let the snippet extractor know that a new snippet begins,
+            // and also put some space, s.t. if someone using the snippet extractor's results
+            // sill wants to print scala.AnyRef as parent, we have space between class name and scala.AnyRef
+            //// print(" ", EmptyTree)
+          }
+          //remove primary constr def and constr val and var defs
+          //right contains all constructors
+          //TODO see impl filter on Tree
+          val (left, right) = body.filter {
+            //remove valdefs defined in constructor and pre-init block
+            case vd: ValDef => !vd.mods.hasFlag(PARAMACCESSOR) && !vd.mods.hasFlag(PRESUPER)
+            case dd: DefDef => !compareNames(dd.name, nme.MIXIN_CONSTRUCTOR) //remove $this$ from traits
+            case EmptyTree => false
+            case _ => true
+          } span {
+            case dd: DefDef => !compareNames(dd.name, nme.CONSTRUCTOR)
+            case _ => true
+          }
+
+          val modBody = left ::: right.drop(1)//List().drop(1) ==> List()
+          val showBody = !(modBody.isEmpty &&
+            (self match {
+              case ValDef(mods, name, TypeTree(), rhs) if (mods & PRIVATE) != 0 && name.decoded == "_" && rhs.isEmpty => true // workaround for superfluous ValDef when parsing class without body using quasi quotes
+              case _ => self.isEmpty
+            }))
+          if (showBody) {
+            if (!compareNames(self.name, nme.WILDCARD)) {
+              print(" { ", self.name);
+              printOpt(": ", self.tpt);
+              print(" =>")
+            } else if (!self.tpt.isEmpty) {
+              print(" { _ : ", self.tpt, " =>")
+            } else {
+              print(" {")
+            }
+            contextManaged(tree) {
+              printColumn(modBody, "", ";", "}")
+            }
+          }
+    }
 
     override def printTree(tree: Tree) {
       tree match {        
-        case ClassDef(mods, name, tparams, impl) =>
+        case classDef @ ClassDef(mods, name, tparams, impl) =>
           contextManaged(tree){
             printAnnotations(tree)
             val word =
@@ -502,7 +637,7 @@ trait Rewriter extends CaseClassPrinter {
                 printParamss foreach { printParams =>
                   //don't print single empty constructor param list
                   if (!(printParams.isEmpty && printParamss.size == 1) || cstrMods.hasFlag(AccessFlags)) {
-                    printConstrParams(printParams, true)
+                    printConstrParams(printParams, true, Some(classDef))
                     print(" ")
                   }
                 }
@@ -512,15 +647,17 @@ trait Rewriter extends CaseClassPrinter {
             //get trees without default classes and traits (when they are last)
             val printedParents = removeDefaultTypesFromList(parents)(List("AnyRef"))(if (mods.hasFlag(CASE)) List("Product", "Serializable") else Nil)
 
-            print(if (mods.isDeferred) "<: " else if (!printedParents.isEmpty) " extends "
-              else "", impl)
+            print(if (mods.isDeferred) "<: " else if (!printedParents.isEmpty) " extends " else "")
+            // don't print impl via print(impl), which calls printTree(impl), which makes impl a child of 
+            // the class, but call it directly, and also give classdef as context
+            printTemplate(impl, Some(tree))
           }
 
         case PackageDef(packaged, stats) =>
           contextManaged(tree){
             packaged match {
               case Ident(name) if compareNames(name, nme.EMPTY_PACKAGE_NAME) =>
-                print(EmptyTree) // instead of Ident(emptyPackageName), for snippets extractor
+                //// print(EmptyTree) // instead of Ident(emptyPackageName), for snippets extractor
                 printSeq(stats) {
                   print(_)
                 } {
@@ -635,101 +772,8 @@ trait Rewriter extends CaseClassPrinter {
             case many =>
               print(many.map(selectorToString).mkString("{", ", ", "}"))
           }
-
-        case Template(parents, self, body) =>
-
-          val printedParents =
-            getCurrentContext() map {
-              //val example: Option[AnyRef => Product1[Any] with AnyRef] = ... - CompoundTypeTree with template
-              case _: CompoundTypeTree => parents
-              case ClassDef(mods, name, _, _) if mods.hasFlag(CASE) => removeDefaultTypesFromList(parents)(List("AnyRef"))(List("Product", "Serializable"))
-              case _ => removeDefaultClassesFromList(parents, List("AnyRef"))
-            } getOrElse(parents)
-
-          val primaryCtrOpt = getPrimaryConstr(body)
-          var ap: Option[Apply] = None
-
-          for (primaryCtr <- primaryCtrOpt) {
-            primaryCtr match {
-              case DefDef(_, _, _, _, _, Block(ctBody @ List(_*), _)) =>
-                ap = ctBody collectFirst {
-                  case apply: Apply => apply
-                }
-
-                //vals in preinit blocks
-                val presuperVals = ctBody filter {
-                  case vd:ValDef => vd.mods.hasFlag(PRESUPER)
-                  case _ => false
-                }
-
-                if (!presuperVals.isEmpty) {
-                  print("{")
-                  printColumn(presuperVals, "", ";", "")
-                  print("} " + (if (!printedParents.isEmpty) "with " else ""))
-                }
-
-              case _ =>
-            }
-          }
-
-          if (!printedParents.isEmpty) {
-            val (clParent :: traits) = printedParents
-            print(clParent)
-
-            def getConstrParams(tree: Tree, cargs: List[List[Tree]]): List[List[Tree]] = {
-              tree match {
-                case Apply(inTree, args) =>
-                  getConstrParams(inTree, cargs):+args
-                case _ => cargs
-              }
-            }
-
-            val applyParamsList = ap map {getConstrParams(_, Nil)} getOrElse Nil
-            applyParamsList foreach {x: List[Tree] => if (!(x.isEmpty && applyParamsList.size == 1)) printRow(x, "(", ", ", ")")}
-
-            if (!traits.isEmpty) {
-              printRow(traits, " with ", " with ", "")
-            }
-          } else {
-            // if no parents are printed, let the snippet extractor know that a new snippet begins,
-            // and also put some space, s.t. if someone using the snippet extractor's results
-            // sill wants to print scala.AnyRef as parent, we have space between class name and scala.AnyRef
-            print(" ", EmptyTree)
-          }
-          //remove primary constr def and constr val and var defs
-          //right contains all constructors
-          //TODO see impl filter on Tree
-          val (left, right) = body.filter {
-            //remove valdefs defined in constructor and pre-init block
-            case vd: ValDef => !vd.mods.hasFlag(PARAMACCESSOR) && !vd.mods.hasFlag(PRESUPER)
-            case dd: DefDef => !compareNames(dd.name, nme.MIXIN_CONSTRUCTOR) //remove $this$ from traits
-            case EmptyTree => false
-            case _ => true
-          } span {
-            case dd: DefDef => !compareNames(dd.name, nme.CONSTRUCTOR)
-            case _ => true
-          }
-
-          val modBody = left ::: right.drop(1)//List().drop(1) ==> List()
-          val showBody = !(modBody.isEmpty &&
-            (self match {
-              case ValDef(mods, name, TypeTree(), rhs) if (mods & PRIVATE) != 0 && name.decoded == "_" && rhs.isEmpty => true // workaround for superfluous ValDef when parsing class without body using quasi quotes
-              case _ => self.isEmpty
-            }))
-          if (showBody) {
-            if (!compareNames(self.name, nme.WILDCARD)) {
-              print(" { ", self.name);
-              printOpt(": ", self.tpt);
-              print(" =>")
-            } else if (!self.tpt.isEmpty) {
-              print(" { _ : ", self.tpt, " =>")
-            } else {
-              print(" {")
-            }
-            contextManaged(tree) {
-              printColumn(modBody, "", ";", "}")
-            }
-          }
+          
+        case tpl: Template => printTemplate(tpl, None) // no class context
 
         case Block(stats, expr) =>
           contextManaged(tree){
@@ -741,6 +785,11 @@ trait Rewriter extends CaseClassPrinter {
           //make this function available for other casses
           //passing required type for checking
           def insertBraces(body: =>Unit) {
+            // simplification: always print parentheses
+            print("(")
+            body
+            print(")")
+            /*
             if (contextStack.exists{
               _.isInstanceOf[Match]
             }) {
@@ -748,6 +797,7 @@ trait Rewriter extends CaseClassPrinter {
                 body
                 print(")")
             } else body
+            */
           }
 
           val printParantheses = specialTreeContext(selector)(iLabelDef = false)
