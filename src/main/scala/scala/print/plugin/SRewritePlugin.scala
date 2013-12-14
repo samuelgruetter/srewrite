@@ -187,7 +187,8 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
               
               //val sourceCode = utils.print6(tree, src)
               //val sourceCode = utils.print6(unit.body, src)
-              val sourceCode = utils.print7(tree) // print7 only possible with before-typer-tree
+              //val sourceCode = utils.print7(tree) // print7 only possible with before-typer-tree
+              val sourceCode = utils.print8(tree, unit.body, src)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -201,8 +202,124 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
     }
   }
 
+  /** can be attached to a tree to indicate that the tree should be overridden by this new tree */
+  case class NewTree(tree: Tree)
+  
   object utils {
     
+    def print8(afterParser: Tree, afterTyper: Tree, source: Array[Char]): String = {
+      undoAutotupling(afterParser, afterTyper) // adds attachments to afterParser tree
+      printWithExplicitTupling(afterParser, source)
+    }
+
+    /** assuming tree is an after parser tree and has attachments indicating what needs to be overridden */
+    def printWithExplicitTupling(tree0: Tree, source: Array[Char]): String = {
+      val r = Rewriter(global)
+      val sp = r.SnippetsPrinter2()
+      val cp = r.ChildrenPrinter()
+
+      def sourceStr(from: Int, to: Int) = String.valueOf(source, from, to-from)
+
+      def getSnippets(tree: r.global.Tree): Seq[String] = {
+        def defaultSnippets = sp.snippets(tree)
+        if (!hasPos(tree.asInstanceOf[Tree])) defaultSnippets else {
+          val (withpos, nopos) = cp.children(tree).partition(t => hasPos(t.asInstanceOf[Tree]))
+          if (!nopos.isEmpty) {
+            val noposStr = nopos.map(_.getClass.getName).mkString("[Trees without position of types ", ", ", "] ")
+            println(s"In tree #${tree.id}: $noposStr")
+            defaultSnippets
+          } else {
+            // all direct children sorted by position
+            val children = withpos.sortBy(_.pos.start)
+            if (!checkChildrenPosInvariants(tree.pos.start, children.asInstanceOf[Seq[Tree]], tree.pos.end)) {
+              defaultSnippets
+            } else {
+              val codeStarts = Seq(tree.pos.start) ++ children.map(_.pos.end)
+              val codeEnds = children.map(_.pos.start) ++ Seq(tree.pos.end)
+              val codeSnippets = for ((s, e) <- codeStarts zip codeEnds) yield sourceStr(s, e)
+              codeSnippets
+            }
+          }
+        }
+      }
+        
+      def rec(tree1: r.global.Tree): String = {
+        val tree2 = tree1.attachments.get(scala.reflect.classTag[NewTree]) match {
+          case Some(NewTree(t)) => t.asInstanceOf[r.global.Tree]
+          case None => tree1
+        }
+        
+        val childrenTrees: Seq[r.global.Tree] = cp.children(tree2)
+        val children: Seq[String] = Seq("") ++ childrenTrees.map(rec(_))
+        val snippets: Seq[String] = getSnippets(tree2)
+
+        val body = (for ((child, snippet) <- children zip snippets) yield child + snippet).mkString("")
+        
+        //s"/*<<${tree.id}*/$body/*${tree.id}>>*/"
+        body
+      }
+      
+      rec(tree0.asInstanceOf[r.global.Tree])      
+    }
+
+    /**
+     * Assumes that children is sorted by start position, and that all children have a start & end position.
+     *  Checks that children are not outside parent and do not overlap each other
+     */
+    def checkChildrenPosInvariants(parentStartPos: Int, children: Seq[Tree], parentEndPos: Int): Boolean = {
+      var good = true
+      for (c <- children if c.pos.start < parentStartPos || c.pos.end > parentEndPos) {
+        println(s"Tree with pos $parentStartPos..$parentEndPos has a child of type ${c.getClass.getName} with pos ${c.pos.start}..${c.pos.end}")
+        println(s"Child = $c\n")
+        good = false
+      }
+
+      if (!children.isEmpty) {
+        for ((c1, c2) <- children zip children.tail if c1.pos.end > c2.pos.start) {
+          println(s"Tree1 of type ${c1.getClass.getName} with pos ${c1.pos.start}..${c1.pos.end} overlaps with sibling Tree2 of type ${c2.getClass.getName} with pos ${c2.pos.start}..${c2.pos.end}")
+          println(s"Tree1 = $c1\n")
+          println(s"Tree2 = $c2\n")
+          good = false
+        }
+      }
+      good
+    }
+    
+    /**
+     * attaches NewTree instances to afterParser tree
+     */
+    def undoAutotupling(afterParser: Tree, afterTyper: Tree): Unit = {
+      val m1 = allPosMap(afterParser)
+      val m2 = allPosMap(afterTyper)
+      val common = (m1.keys.toSet intersect m2.keys.toSet).toList.sorted
+      for (pos <- common; t1 <- m1(pos); t2 <- m2(pos)) undoAutotuplingOnOneTree(t1, t2)
+    }
+    
+    def undoAutotuplingOnOneTree(afterParser: Tree, afterTyper: Tree): Unit = {
+      (afterParser, afterTyper) match {
+        // unit might be a BoxedUnit, so we check using toString
+        case (Apply(func1, Nil), Apply(func2, Literal(Constant(unit)) :: Nil)) if unit.toString == "()" => {
+          // TODO check that func1 and func2 represent the same
+          reportReplacement(afterParser, afterTyper)
+          println(s">>> Autotupling of arity 0 detected\n")
+          val newTree = afterTyper
+          val att = NewTree(newTree)
+          afterParser.attachments.update(att)
+        }
+        case (Apply(func1, args1), Apply(func2, tupleConstr :: Nil)) => { 
+          // TODO check that func1 and func2 represent the same
+          val arity = args1.length
+          if (tupleConstr.toString.contains("Tuple" + arity)) {
+            reportReplacement(afterParser, afterTyper)
+            println(s">>> Autotupling of arity $arity detected\n")
+            val newTree = afterTyper
+            val att = NewTree(newTree)
+            afterParser.attachments.update(att)
+          }
+        }
+        case _ =>
+      }
+    }
     
     def traverse(tree: Tree)(action: Tree => Unit): Unit = {
       action(tree)
