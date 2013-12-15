@@ -3,16 +3,43 @@ package scala.print.plugin
 trait ExtractChildren extends WithGlobal with CaseClassPrinter {
 
   import global._
-
-  private def listChildren0(tree: Tree): Seq[Tree] = tree match {
-    // shortcuts because template inside classes lack position
+  
+  private def listChildrenRaw(tree: Tree): Seq[Tree] = tree match {
+    
+    // merge ClassDef + enclosed Template into one because template inside classes lack position
     case ClassDef(mods, name, tparams, Template(parents, self, body)) =>
-      tparams ++ parents ++ Seq(self) ++ body    
+      println("case 1")
+      tparams ++ parents.filter(hasPos(_)) ++ treatSelf(self) ++ body
+       // parents without pos are AnyRef, or Serializable/Product for case classes
+      
+    // merge ModuleDef + enclosed Template into one because template inside classes lack position
     case ModuleDef(mods, name, Template(parents, self, body)) =>
-      parents ++ Seq(self) ++ body
-    case _ => tree.children
-  }
+      println("case 2")
+      parents.filter(hasPos(_)) ++ treatSelf(self) ++ body
 
+    case Template(parents, self, body) =>
+      println("case 3")
+      parents.filter(hasPos(_)) ++ treatSelf(self) ++ body
+      
+    // children of default package               (packageName.isEmpty does not work)
+    case PackageDef(Ident(packageName), stats) if packageName.toString == "<empty>" =>
+      println("case 4")
+      stats
+      
+    case TypeDef(mods, name, tparams, TypeBoundsTree(lo, hi)) => 
+      tparams ++ treatTypeBound(lo) ++ treatTypeBound(hi)
+
+    case _ =>
+      println("case 5")
+      tree.children
+  }
+  
+  private def treatSelf(self: ValDef): Seq[ValDef] = if (self.isEmpty) Seq() else Seq(self)
+
+  // Type bounds without position are inferred Nothing or Any.
+  // hasPos is better criterion than ==Nothing/Any, because Nothing/Any could have been written explicitly
+  private def treatTypeBound(b: Tree): Seq[Tree] = if (hasPos(b)) Seq(b) else Seq()
+  
   def hasPos(tree: Tree): Boolean = try {
     tree.pos.start < tree.pos.end
   } catch {
@@ -22,11 +49,17 @@ trait ExtractChildren extends WithGlobal with CaseClassPrinter {
   class BadPositionsException extends Exception
 
   def listChildren(tree: Tree): Seq[Tree] = {
-    val (withpos, nopos) = listChildren0(tree).partition(hasPos(_))
+    val c = listChildrenRaw(tree) filter {
+      case DefDef(mods, name, tparams, vparamss, tp, rhs) => name.isEmpty
+      case EmptyTree => false
+      case t => true
+    }
+    val (withpos, nopos) = c.partition(hasPos(_))
     if (!nopos.isEmpty) {
       val noposStr = nopos.map(_.getClass.getName).mkString("[Trees without position of types ", ", ", "] ")
       println(s"In tree #${tree.id}: $noposStr")
       println(showCaseClass(tree))
+      println(c.map(showCaseClass(_)).mkString(" --- "))
       println(tree)
       throw new BadPositionsException
     } else {
