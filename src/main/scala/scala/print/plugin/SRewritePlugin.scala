@@ -16,7 +16,7 @@ object SRewritePlugin {
   val overSrcOpt = "oversrc"
 }
 
-class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
+class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter with ExtractChildren {
   import SRewritePlugin._
   import global._
 
@@ -188,7 +188,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
               //val sourceCode = utils.print6(tree, src)
               //val sourceCode = utils.print6(unit.body, src)
               //val sourceCode = utils.print7(tree) // print7 only possible with before-typer-tree
-              val sourceCode = utils.print8(tree, unit.body, src)
+              val sourceCode = utils.print9(tree, unit.body, src)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -207,13 +207,86 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
   
   object utils {
     
+    def print9(afterParser: Tree, afterTyper: Tree, source: Array[Char]): String = {
+      markAutotupling(afterParser, afterTyper) // adds attachments to afterParser tree
+      printWithExplicitTupling(afterParser, source)
+    }
+    
+    /** assuming tree is an after parser tree and has object Autotupled attached where needed */
+    def printWithExplicitTupling(tree0: Tree, source: Array[Char]): String = {
+      def sourceStr(from: Int, to: Int) = String.valueOf(source, from, to-from)
+
+      def insertParentheses(snippets: Seq[String]): Seq[String] = {
+        //  snippet0 funcTree snip(pet1 argTree snip,pet2 argTree ... snip)petN
+        val n = snippets.length - 1
+        snippets.updated(1, "(" + snippets(1)).updated(n, snippets(n) + ")")
+      }
+      
+      def rec(tree: Tree): String = {
+        val children = listChildren(tree)
+        val codeStarts = Seq(tree.pos.start) ++ children.map(_.pos.end)
+        val codeEnds = children.map(_.pos.start) ++ Seq(tree.pos.end)
+        val originalSnippets = for ((s, e) <- codeStarts zip codeEnds) yield sourceStr(s, e)
+
+        val x = tree.attachments.get(scala.reflect.classTag[Autotupled]) match {
+          case Some(_) => 0
+          case None => 1
+        }
+        
+        val childrenStrs: Seq[String] = Seq("") ++ children.map(rec(_))
+        val snippets: Seq[String] = tree.attachments.get(scala.reflect.classTag[Autotupled]) match {
+          case Some(_) => insertParentheses(originalSnippets)
+          case None => originalSnippets
+        }
+
+        val body = (for ((child, snippet) <- childrenStrs zip snippets) yield child + snippet).mkString("")
+        
+        //s"/*<<${tree.id}*/$body/*${tree.id}>>*/"
+        body
+      }
+      
+      rec(tree0)      
+    }
+
+    case class Autotupled // marker object
+    
+    /** attaches object Autotupled to all autotupled Apply ASTs */ 
+    def markAutotupling(afterParser: Tree, afterTyper: Tree): Unit = {
+      val m1 = allPosMap(afterParser)
+      val m2 = allPosMap(afterTyper)
+      val common = (m1.keys.toSet intersect m2.keys.toSet).toList.sorted
+      for (pos <- common; t1 <- m1(pos); t2 <- m2(pos)) markAutotuplingOnOneTree(t1, t2)
+    }
+    
+    def markAutotuplingOnOneTree(afterParser: Tree, afterTyper: Tree): Unit = {
+      (afterParser, afterTyper) match {
+        // unit might be a BoxedUnit, so we check using toString
+        case (Apply(func1, Nil), Apply(func2, Literal(Constant(unit)) :: Nil)) if unit.toString == "()" => {
+          // TODO check that func1 and func2 represent the same
+          reportReplacement(afterParser, afterTyper)
+          println(s">>> Autotupling of arity 0 detected\n")
+          afterParser.attachments.update(Autotupled)
+        }
+        case (Apply(func1, args1), Apply(func2, tupleConstr :: Nil)) => { 
+          // TODO check that func1 and func2 represent the same
+          val arity = args1.length
+          if (tupleConstr.toString.contains("Tuple" + arity)) {
+            reportReplacement(afterParser, afterTyper)
+            println(s">>> Autotupling of arity $arity detected\n")
+            afterParser.attachments.update(Autotupled)
+          }
+        }
+        case _ =>
+      }
+    }
+    
     def print8(afterParser: Tree, afterTyper: Tree, source: Array[Char]): String = {
       undoAutotupling(afterParser, afterTyper) // adds attachments to afterParser tree
-      printWithExplicitTupling(afterParser, source)
+      printWithExplicitTupling0(afterParser, source)
     }
 
     /** assuming tree is an after parser tree and has attachments indicating what needs to be overridden */
-    def printWithExplicitTupling(tree0: Tree, source: Array[Char]): String = {
+    def printWithExplicitTupling0(tree0: Tree, source: Array[Char]): String = {
       val r = Rewriter(global)
       val sp = r.SnippetsPrinter2()
       val cp = r.ChildrenPrinter()
@@ -260,29 +333,6 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
       }
       
       rec(tree0.asInstanceOf[r.global.Tree])      
-    }
-
-    /**
-     * Assumes that children is sorted by start position, and that all children have a start & end position.
-     *  Checks that children are not outside parent and do not overlap each other
-     */
-    def checkChildrenPosInvariants(parentStartPos: Int, children: Seq[Tree], parentEndPos: Int): Boolean = {
-      var good = true
-      for (c <- children if c.pos.start < parentStartPos || c.pos.end > parentEndPos) {
-        println(s"Tree with pos $parentStartPos..$parentEndPos has a child of type ${c.getClass.getName} with pos ${c.pos.start}..${c.pos.end}")
-        println(s"Child = $c\n")
-        good = false
-      }
-
-      if (!children.isEmpty) {
-        for ((c1, c2) <- children zip children.tail if c1.pos.end > c2.pos.start) {
-          println(s"Tree1 of type ${c1.getClass.getName} with pos ${c1.pos.start}..${c1.pos.end} overlaps with sibling Tree2 of type ${c2.getClass.getName} with pos ${c2.pos.start}..${c2.pos.end}")
-          println(s"Tree1 = $c1\n")
-          println(s"Tree2 = $c2\n")
-          good = false
-        }
-      }
-      good
     }
     
     /**
@@ -451,12 +501,6 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter {
       println(s"by ${newTree.id} of type ${newTree.getClass.getName}")
       println(newTree)
       println()
-    }
-    
-    def hasPos(tree: Tree): Boolean = try {
-      tree.pos.start < tree.pos.end
-    } catch {
-      case e: java.lang.UnsupportedOperationException => false
     }
 
     class OverlapException extends Exception
