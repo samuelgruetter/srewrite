@@ -12,7 +12,7 @@ trait ExtractChildren extends WithGlobal with CaseClassPrinter {
       tparams ++ parents.filter(hasPos(_)) ++ treatSelf(self) ++ body
        // parents without pos are AnyRef, or Serializable/Product for case classes
       
-    // merge ModuleDef + enclosed Template into one because template inside classes lack position
+    // merge ModuleDef + enclosed Template into one because template inside modules lack position
     case ModuleDef(mods, name, Template(parents, self, body)) =>
       println("case 2")
       parents.filter(hasPos(_)) ++ treatSelf(self) ++ body
@@ -48,12 +48,14 @@ trait ExtractChildren extends WithGlobal with CaseClassPrinter {
   
   class BadPositionsException extends Exception
 
+  def listChildrenWithoutPositionChecks(tree: Tree): Seq[Tree] = listChildrenRaw(tree) filter {
+    case DefDef(mods, name, tparams, vparamss, tp, rhs) => name.isEmpty
+    case EmptyTree => false
+    case t => true
+  }
+  
   def listChildren(tree: Tree): Seq[Tree] = {
-    val c = listChildrenRaw(tree) filter {
-      case DefDef(mods, name, tparams, vparamss, tp, rhs) => name.isEmpty
-      case EmptyTree => false
-      case t => true
-    }
+    val c = listChildrenWithoutPositionChecks(tree)
     val (withpos, nopos) = c.partition(hasPos(_))
     if (!nopos.isEmpty) {
       val noposStr = nopos.map(_.getClass.getName).mkString("[Trees without position of types ", ", ", "] ")

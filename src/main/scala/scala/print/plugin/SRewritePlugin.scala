@@ -9,6 +9,7 @@ import scala.tools.nsc.ast.Printers
 import java.io.{StringWriter, PrintWriter, File}
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.{MultiMap, HashMap, Set}
+import scala.reflect.internal.util.SourceFile
 
 object SRewritePlugin {
   val baseDirectoryOpt = "base-dir:"
@@ -16,7 +17,7 @@ object SRewritePlugin {
   val overSrcOpt = "oversrc"
 }
 
-class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter with ExtractChildren {
+class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter with ExtractChildren with FixPositions {
   import SRewritePlugin._
   import global._
 
@@ -188,7 +189,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
               //val sourceCode = utils.print6(tree, src)
               //val sourceCode = utils.print6(unit.body, src)
               //val sourceCode = utils.print7(tree) // print7 only possible with before-typer-tree
-              val sourceCode = utils.print9(tree, unit.body, src)
+              val sourceCode = utils.print9(tree, unit.body, unit.source)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -196,7 +197,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
         } catch {
           case e: Exception =>
             e.printStackTrace()
-            throw e
+            // throw e
         }
       }
     }
@@ -207,9 +208,10 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
   
   object utils {
     
-    def print9(afterParser: Tree, afterTyper: Tree, source: Array[Char]): String = {
+    def print9(afterParser: Tree, afterTyper: Tree, sourceFile: SourceFile): String = {
+      fixPositions(afterParser, sourceFile)
       markAutotupling(afterParser, afterTyper) // adds attachments to afterParser tree
-      printWithExplicitTupling(afterParser, source)
+      printWithExplicitTupling(afterParser, sourceFile.content)
     }
     
     /** assuming tree is an after parser tree and has object Autotupled attached where needed */
@@ -224,6 +226,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
       
       def rec(tree: Tree): String = {
         val children = listChildren(tree)
+        //val children = listChildrenWithoutPositionChecks(tree)
         val codeStarts = Seq(tree.pos.start) ++ children.map(_.pos.end)
         val codeEnds = children.map(_.pos.start) ++ Seq(tree.pos.end)
         val originalSnippets = for ((s, e) <- codeStarts zip codeEnds) yield sourceStr(s, e)
@@ -241,8 +244,8 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
 
         val body = (for ((child, snippet) <- childrenStrs zip snippets) yield child + snippet).mkString("")
         
-        //s"/*<<${tree.id}*/$body/*${tree.id}>>*/"
-        body
+        s"/*<<${tree.id}*/$body/*${tree.id}>>*/"
+        //body
       }
       
       rec(tree0)      
