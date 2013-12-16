@@ -13,7 +13,7 @@ Demo: The [diff](https://github.com/samuelgruetter/srewrite-test/compare/diffdem
 
 ### Build process
 
-From printplugin directory run:
+From srewrite directory run:
 
 ```shell
 $ sbt assembly
