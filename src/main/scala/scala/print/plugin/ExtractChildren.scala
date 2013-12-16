@@ -49,7 +49,7 @@ trait ExtractChildren extends WithGlobal with CaseClassPrinter {
   class BadPositionsException extends Exception
 
   def listChildrenWithoutPositionChecks(tree: Tree): Seq[Tree] = listChildrenRaw(tree) filter {
-    case DefDef(mods, name, tparams, vparamss, tp, rhs) => name.isEmpty
+    case DefDef(mods, name, tparams, vparamss, tp, rhs) => name.toString != "<init>" // name.isEmpty does not work
     case EmptyTree => false
     case t => true
   }
@@ -59,6 +59,10 @@ trait ExtractChildren extends WithGlobal with CaseClassPrinter {
     val (withpos, nopos) = c.partition(hasPos(_))
     if (!nopos.isEmpty) {
       val noposStr = nopos.map(_.getClass.getName).mkString("[Trees without position of types ", ", ", "] ")
+      for (DefDef(mods, name, tparams, vparamss, tpt, rhs) <- nopos) {
+        println(mods + " " + mods.getClass.getName)
+        println(name + " " + name.getClass.getName)
+      }
       println(s"In tree #${tree.id}: $noposStr")
       println(showCaseClass(tree))
       println(c.map(showCaseClass(_)).mkString(" --- "))

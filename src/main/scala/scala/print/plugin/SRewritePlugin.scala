@@ -214,6 +214,8 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
       printWithExplicitTupling(afterParser, sourceFile.content)
     }
     
+    def showWithPos(tree: Tree): String = s"[(${tree.pos.start}) ${showCaseClass(tree)} (${tree.pos.end})]"
+    
     /** assuming tree is an after parser tree and has object Autotupled attached where needed */
     def printWithExplicitTupling(tree0: Tree, source: Array[Char]): String = {
       def sourceStr(from: Int, to: Int) = String.valueOf(source, from, to-from)
@@ -226,7 +228,11 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
       
       def rec(tree: Tree): String = {
         val children = listChildren(tree)
-        //val children = listChildrenWithoutPositionChecks(tree)
+        // val children = listChildrenWithoutPositionChecks(tree)
+        
+        // println("Tree: " + showWithPos(tree))
+        // println("Children: " + children.map(showWithPos).mkString(" "))
+        
         val codeStarts = Seq(tree.pos.start) ++ children.map(_.pos.end)
         val codeEnds = children.map(_.pos.start) ++ Seq(tree.pos.end)
         val originalSnippets = for ((s, e) <- codeStarts zip codeEnds) yield sourceStr(s, e)
