@@ -209,31 +209,29 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
   object utils {
     
     def print10(afterParser: Tree, afterTyper: Tree, source: Array[Char]): String = {
-      markAutotupling(afterParser, afterTyper) // adds attachments to afterParser tree
+      val autotupled = scala.collection.mutable.Set[Tree]()
+      markAutotupling(afterParser, afterTyper, t => autotupled.add(t))
       val source2 = source.map(String.valueOf(_))
-      addTuplingParentheses(afterParser, source2)
+      addTuplingParentheses(afterParser, source2, t => autotupled.contains(t))
       source2.mkString
     }
 
     /** assuming tree is an after parser tree and has object Autotupled attached where needed 
      *  @param source each String of length 1, can be used to add parentheses */
-    def addTuplingParentheses(tree0: Tree, source: Array[String]): Unit = {
+    def addTuplingParentheses(tree0: Tree, source: Array[String], isMarked: Tree => Boolean): Unit = {
       
       def rec(tree: Tree): Unit = {
         println("Looking at " + tree)
         
         // val children = listChildren(tree)
         val children = listChildrenWithoutPositionChecks(tree)
-        tree.attachments.get(scala.reflect.classTag[Autotupled]) match {
-          case Some(_) => 
-            //  snippet0 funcTree snip(pet1 argTree snip,pet2 argTree ... snip)petN
-            val p1 = children(0).pos.end
-            source(p1) = "(" + source(p1)
-            val p2 = tree.pos.end
-            source(p2) = ")" + source(p2)
-            println("--- parentheses inserted")
-          case None => 
-            println("no parentheses inserted")
+        if (isMarked(tree)) {
+          //  snippet0 funcTree snip(pet1 argTree snip,pet2 argTree ... snip)petN
+          val p1 = children(0).pos.end
+          source(p1) = "(" + source(p1)
+          val p2 = tree.pos.end
+          source(p2) = ")" + source(p2)
+          println("--- parentheses inserted")
         }
         
         for (c <- children) rec(c)
@@ -292,30 +290,23 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
       rec(tree0)      
     }
     */
-    class Autotupled // marker object
     
     /** attaches `Autotupled` to all autotupled Apply ASTs */ 
-    def markAutotupling(afterParser: Tree, afterTyper: Tree): Unit = {
+    def markAutotupling(afterParser: Tree, afterTyper: Tree, mark: Tree => Unit): Unit = {
       val m1 = allPosMap(afterParser)
       val m2 = allPosMap(afterTyper)
       val common = (m1.keys.toSet intersect m2.keys.toSet).toList.sorted
-      for (pos <- common; t1 <- m1(pos); t2 <- m2(pos)) markAutotuplingOnOneTree(t1, t2)
+      for (pos <- common; t1 <- m1(pos); t2 <- m2(pos)) markAutotuplingOnOneTree(t1, t2, mark)
     }
     
-    def markAutotuplingOnOneTree(afterParser: Tree, afterTyper: Tree): Unit = {
+    def markAutotuplingOnOneTree(afterParser: Tree, afterTyper: Tree, mark: Tree => Unit): Unit = {
       (afterParser, afterTyper) match {
         // unit might be a BoxedUnit, so we check using toString
         case (Apply(func1, Nil), Apply(func2, Literal(Constant(unit)) :: Nil)) if unit.toString == "()" => {
           // TODO check that func1 and func2 represent the same
           reportReplacement(afterParser, afterTyper)
           println(s"-> Autotupling of arity 0 detected\n")
-          
-          afterParser.attachments.update(new Autotupled())(scala.reflect.classTag[Autotupled])
-
-          afterParser.attachments.get(scala.reflect.classTag[Autotupled]) match {
-            case Some(_) => println("OK")
-            case None => println("Not OK!!")
-          }
+          mark(afterParser)
         }
         case (Apply(func1, args1), Apply(func2, tupleConstr :: Nil)) => { 
           // TODO check that func1 and func2 represent the same
@@ -323,13 +314,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
           if (tupleConstr.toString.contains("Tuple" + arity)) {
             reportReplacement(afterParser, afterTyper)
             println(s"-> Autotupling of arity $arity detected\n")
-            afterParser.attachments.update[Autotupled](new Autotupled())
-            
-            //afterParser.attachments.get[Autotupled] match {
-            afterParser.attachments.get(scala.reflect.classTag[Autotupled]) match {
-              case Some(_) => println("OK")
-              case None => println("Not OK!!")
-            }
+            mark(afterParser)
           }
         }
         case _ =>
