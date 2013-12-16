@@ -27,7 +27,7 @@ trait UndoAutotupling extends WithGlobal with ExtractChildren {
       if (isMarked(tree)) {
         //  snippet0 funcTree snip(pet1 argTree snip,pet2 argTree ... snip)petN
         val p1 = children(0).pos.end
-        source(p1) = "(" + source(p1)
+        source(p1) = source(p1) + "("
         val p2 = tree.pos.end - 1
         source(p2) = source(p2) + ")"
 
