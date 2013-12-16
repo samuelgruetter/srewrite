@@ -10,6 +10,7 @@ import java.io.{StringWriter, PrintWriter, File}
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.{MultiMap, HashMap, Set}
 import scala.reflect.internal.util.SourceFile
+import scala.reflect.internal.util.OffsetPosition
 
 object SRewritePlugin {
   val baseDirectoryOpt = "base-dir:"
@@ -189,7 +190,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
               //val sourceCode = utils.print6(tree, src)
               //val sourceCode = utils.print6(unit.body, src)
               //val sourceCode = utils.print7(tree) // print7 only possible with before-typer-tree
-              val sourceCode = utils.print10(tree, unit.body, unit.source.content)
+              val sourceCode = utils.print10(tree, unit.body, unit)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -197,7 +198,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
         } catch {
           case e: Exception =>
             e.printStackTrace()
-            // throw e
+            throw e
         }
       }
     }
@@ -208,30 +209,30 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
   
   object utils {
     
-    def print10(afterParser: Tree, afterTyper: Tree, source: Array[Char]): String = {
+    def print10(afterParser: Tree, afterTyper: Tree, cu: CompilationUnit): String = {
       val autotupled = scala.collection.mutable.Set[Tree]()
       markAutotupling(afterParser, afterTyper, t => autotupled.add(t))
-      val source2 = source.map(String.valueOf(_))
-      addTuplingParentheses(afterParser, source2, t => autotupled.contains(t))
+      val source2 = cu.source.content.map(String.valueOf(_))
+      addTuplingParentheses(afterParser, source2, t => autotupled.contains(t), cu)
       source2.mkString
     }
 
     /** assuming tree is an after parser tree and has object Autotupled attached where needed 
      *  @param source each String of length 1, can be used to add parentheses */
-    def addTuplingParentheses(tree0: Tree, source: Array[String], isMarked: Tree => Boolean): Unit = {
+    def addTuplingParentheses(tree0: Tree, source: Array[String], isMarked: Tree => Boolean, cu: CompilationUnit): Unit = {
       
       def rec(tree: Tree): Unit = {
-        println("Looking at " + tree)
-        
         // val children = listChildren(tree)
         val children = listChildrenWithoutPositionChecks(tree)
         if (isMarked(tree)) {
           //  snippet0 funcTree snip(pet1 argTree snip,pet2 argTree ... snip)petN
           val p1 = children(0).pos.end
           source(p1) = "(" + source(p1)
-          val p2 = tree.pos.end
-          source(p2) = ")" + source(p2)
-          println("--- parentheses inserted")
+          val p2 = tree.pos.end - 1
+          source(p2) = source(p2) + ")"
+
+          cu.echo(new OffsetPosition(cu.source, p1), "Inserting '(' here")
+          cu.echo(new OffsetPosition(cu.source, p2), "Inserting ')' here")
         }
         
         for (c <- children) rec(c)
@@ -304,16 +305,16 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
         // unit might be a BoxedUnit, so we check using toString
         case (Apply(func1, Nil), Apply(func2, Literal(Constant(unit)) :: Nil)) if unit.toString == "()" => {
           // TODO check that func1 and func2 represent the same
-          reportReplacement(afterParser, afterTyper)
-          println(s"-> Autotupling of arity 0 detected\n")
+          // reportReplacement(afterParser, afterTyper)
+          // println(s"-> Autotupling of arity 0 detected\n")
           mark(afterParser)
         }
         case (Apply(func1, args1), Apply(func2, tupleConstr :: Nil)) => { 
           // TODO check that func1 and func2 represent the same
           val arity = args1.length
           if (tupleConstr.toString.contains("Tuple" + arity)) {
-            reportReplacement(afterParser, afterTyper)
-            println(s"-> Autotupling of arity $arity detected\n")
+            // reportReplacement(afterParser, afterTyper)
+            // println(s"-> Autotupling of arity $arity detected\n")
             mark(afterParser)
           }
         }
