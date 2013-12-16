@@ -8,29 +8,24 @@ trait ExtractChildren extends WithGlobal with CaseClassPrinter {
     
     // merge ClassDef + enclosed Template into one because template inside classes lack position
     case ClassDef(mods, name, tparams, Template(parents, self, body)) =>
-      println("case 1")
       tparams ++ parents.filter(hasPos(_)) ++ treatSelf(self) ++ body
        // parents without pos are AnyRef, or Serializable/Product for case classes
       
     // merge ModuleDef + enclosed Template into one because template inside modules lack position
     case ModuleDef(mods, name, Template(parents, self, body)) =>
-      println("case 2")
       parents.filter(hasPos(_)) ++ treatSelf(self) ++ body
 
     case Template(parents, self, body) =>
-      println("case 3")
       parents.filter(hasPos(_)) ++ treatSelf(self) ++ body
       
     // children of default package               (packageName.isEmpty does not work)
     case PackageDef(Ident(packageName), stats) if packageName.toString == "<empty>" =>
-      println("case 4")
       stats
       
     case TypeDef(mods, name, tparams, TypeBoundsTree(lo, hi)) => 
       tparams ++ treatTypeBound(lo) ++ treatTypeBound(hi)
 
     case _ =>
-      println("case 5")
       tree.children
   }
   

@@ -184,12 +184,12 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
               
               println("-- Source name: " + fileName + " --")
               
-              utils.compare3(tree, unit.body)
+              // utils.compare3(tree, unit.body)
               
               //val sourceCode = utils.print6(tree, src)
               //val sourceCode = utils.print6(unit.body, src)
               //val sourceCode = utils.print7(tree) // print7 only possible with before-typer-tree
-              val sourceCode = utils.print9(tree, unit.body, unit.source)
+              val sourceCode = utils.print10(tree, unit.body, unit.source.content)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
@@ -208,14 +208,49 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
   
   object utils {
     
+    def print10(afterParser: Tree, afterTyper: Tree, source: Array[Char]): String = {
+      markAutotupling(afterParser, afterTyper) // adds attachments to afterParser tree
+      val source2 = source.map(String.valueOf(_))
+      addTuplingParentheses(afterParser, source2)
+      source2.mkString
+    }
+
+    /** assuming tree is an after parser tree and has object Autotupled attached where needed 
+     *  @param source each String of length 1, can be used to add parentheses */
+    def addTuplingParentheses(tree0: Tree, source: Array[String]): Unit = {
+      
+      def rec(tree: Tree): Unit = {
+        println("Looking at " + tree)
+        
+        // val children = listChildren(tree)
+        val children = listChildrenWithoutPositionChecks(tree)
+        tree.attachments.get(scala.reflect.classTag[Autotupled]) match {
+          case Some(_) => 
+            //  snippet0 funcTree snip(pet1 argTree snip,pet2 argTree ... snip)petN
+            val p1 = children(0).pos.end
+            source(p1) = "(" + source(p1)
+            val p2 = tree.pos.end
+            source(p2) = ")" + source(p2)
+            println("--- parentheses inserted")
+          case None => 
+            println("no parentheses inserted")
+        }
+        
+        for (c <- children) rec(c)
+      }
+      
+      rec(tree0)      
+    }
+
+    /*
     def print9(afterParser: Tree, afterTyper: Tree, sourceFile: SourceFile): String = {
       fixPositions(afterParser, sourceFile)
       markAutotupling(afterParser, afterTyper) // adds attachments to afterParser tree
       printWithExplicitTupling(afterParser, sourceFile.content)
     }
-    
+    */
     def showWithPos(tree: Tree): String = s"[(${tree.pos.start}) ${showCaseClass(tree)} (${tree.pos.end})]"
-    
+    /*
     /** assuming tree is an after parser tree and has object Autotupled attached where needed */
     def printWithExplicitTupling(tree0: Tree, source: Array[Char]): String = {
       def sourceStr(from: Int, to: Int) = String.valueOf(source, from, to-from)
@@ -256,10 +291,10 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
       
       rec(tree0)      
     }
-
-    case class Autotupled // marker object
+    */
+    class Autotupled // marker object
     
-    /** attaches object Autotupled to all autotupled Apply ASTs */ 
+    /** attaches `Autotupled` to all autotupled Apply ASTs */ 
     def markAutotupling(afterParser: Tree, afterTyper: Tree): Unit = {
       val m1 = allPosMap(afterParser)
       val m2 = allPosMap(afterTyper)
@@ -273,22 +308,34 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
         case (Apply(func1, Nil), Apply(func2, Literal(Constant(unit)) :: Nil)) if unit.toString == "()" => {
           // TODO check that func1 and func2 represent the same
           reportReplacement(afterParser, afterTyper)
-          println(s">>> Autotupling of arity 0 detected\n")
-          afterParser.attachments.update(Autotupled)
+          println(s"-> Autotupling of arity 0 detected\n")
+          
+          afterParser.attachments.update(new Autotupled())(scala.reflect.classTag[Autotupled])
+
+          afterParser.attachments.get(scala.reflect.classTag[Autotupled]) match {
+            case Some(_) => println("OK")
+            case None => println("Not OK!!")
+          }
         }
         case (Apply(func1, args1), Apply(func2, tupleConstr :: Nil)) => { 
           // TODO check that func1 and func2 represent the same
           val arity = args1.length
           if (tupleConstr.toString.contains("Tuple" + arity)) {
             reportReplacement(afterParser, afterTyper)
-            println(s">>> Autotupling of arity $arity detected\n")
-            afterParser.attachments.update(Autotupled)
+            println(s"-> Autotupling of arity $arity detected\n")
+            afterParser.attachments.update[Autotupled](new Autotupled())
+            
+            //afterParser.attachments.get[Autotupled] match {
+            afterParser.attachments.get(scala.reflect.classTag[Autotupled]) match {
+              case Some(_) => println("OK")
+              case None => println("Not OK!!")
+            }
           }
         }
         case _ =>
       }
     }
-    
+    /*
     def print8(afterParser: Tree, afterTyper: Tree, source: Array[Char]): String = {
       undoAutotupling(afterParser, afterTyper) // adds attachments to afterParser tree
       printWithExplicitTupling0(afterParser, source)
@@ -379,7 +426,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
         case _ =>
       }
     }
-    
+    */
     def traverse(tree: Tree)(action: Tree => Unit): Unit = {
       action(tree)
       tree.children.foreach(t => traverse(t)(action))
@@ -390,7 +437,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
       traverse(tree){t => {if (hasPos(t)) mm.addBinding(t.pos.start, t)}}
       mm
     }
-    
+    /*
     def compare3(oldTree: Tree, newTree: Tree): Unit = {
       val m1 = allPosMap(oldTree)
       val m2 = allPosMap(newTree)
@@ -495,7 +542,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
         reportReplacement(oldTree, newTree)
       }
     }
-    
+    */
     def reportReplacement(oldTree: Tree, newTree: Tree): Unit = {
       println(s"\nReplacement: #${oldTree.id}: ${showCaseClass(oldTree)}")
       println(oldTree)
@@ -503,7 +550,7 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
       println(newTree)
       println()
     }
-    
+    /*
     def reportReplacement0(oldTree: Tree, newTree: Tree): Unit = {
       println(s"\nReplacement: ${oldTree.id} of type ${oldTree.getClass.getName}")
       println(oldTree)
@@ -569,6 +616,8 @@ class SRewritePlugin(val global: Global) extends Plugin with CaseClassPrinter wi
         case e: OverlapException => "error"
       }
     }
+    */
+
   }
 }
 
