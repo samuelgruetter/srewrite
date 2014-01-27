@@ -7,7 +7,8 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
 
   import global._
   
-  def dbg(msg: String): Unit = {}
+  //def dbg(msg: String): Unit = {}
+  def dbg(msg: String): Unit = println(msg)
   
   /**
    * tree: after parser tree
@@ -17,6 +18,7 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
     def forOneDefDef(dd: DefDef, source: Array[String]): Unit =
       if ((dd.tpt.toString == "Unit" || dd.tpt.toString == "scala.Unit") && 
           dd.name.toString != "$init$" &&
+          dd.name.toString != "<init>" &&
           ! dd.rhs.isEmpty) {
         // hasPos requires that it spans strictly more than 0 chars, which is not the case for inserted Unit
         val l = dd.children.filter(hasPos(_)).sortBy(_.pos.start)

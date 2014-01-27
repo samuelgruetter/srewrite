@@ -51,7 +51,7 @@ trait UndoAutotupling extends WithGlobal with ExtractChildren {
   def markAutotuplingOnOneTree(afterParser: Tree, afterTyper: Tree, mark: Tree => Unit): Unit = {
     (afterParser, afterTyper) match {
       // unit might be a BoxedUnit, so we check using toString
-      case (Apply(func1, Nil), Apply(func2, Literal(Constant(unit)) :: Nil)) if unit.toString == "()" => {
+      case (Apply(func1, Nil), Apply(func2, Literal(Constant(unit)) :: Nil)) if unit != null && unit.toString == "()" => {
         // TODO check that func1 and func2 represent the same
         // reportReplacement(afterParser, afterTyper)
         // println(s"-> Autotupling of arity 0 detected\n")
