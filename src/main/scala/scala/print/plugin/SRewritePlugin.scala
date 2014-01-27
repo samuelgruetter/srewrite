@@ -16,7 +16,7 @@ object SRewritePlugin {
   val overSrcOpt = "oversrc"
 }
 
-class SRewritePlugin(val global: Global) extends Plugin with UndoAutotupling {
+class SRewritePlugin(val global: Global) extends Plugin with Transformations {
   import SRewritePlugin._
   import global._
 
@@ -166,7 +166,7 @@ class SRewritePlugin(val global: Global) extends Plugin with UndoAutotupling {
               
               println("-- Source name: " + fileName + " --")
               
-              val sourceCode = undoAutotupling(afterParserTree, afterTyperTree, unit)
+              val sourceCode = transformations(afterParserTree, afterTyperTree, unit)
               
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else

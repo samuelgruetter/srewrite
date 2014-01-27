@@ -7,12 +7,10 @@ trait UndoAutotupling extends WithGlobal with ExtractChildren {
 
   import global._
 
-  def undoAutotupling(afterParser: Tree, afterTyper: Tree, cu: CompilationUnit): String = {
+  def undoAutotupling(afterParser: Tree, afterTyper: Tree, source: Array[String], cu: CompilationUnit): Unit = {
     val autotupled = scala.collection.mutable.Set[Tree]()
     markAutotupling(afterParser, afterTyper, t => autotupled.add(t))
-    val source2 = cu.source.content.map(String.valueOf(_))
-    addTuplingParentheses(afterParser, source2, t => autotupled.contains(t), cu)
-    source2.mkString
+    addTuplingParentheses(afterParser, source, t => autotupled.contains(t), cu)
   }
 
   /**
@@ -70,11 +68,6 @@ trait UndoAutotupling extends WithGlobal with ExtractChildren {
       }
       case _ =>
     }
-  }
-
-  def traverse(tree: Tree)(action: Tree => Unit): Unit = {
-    action(tree)
-    tree.children.foreach(t => traverse(t)(action))
   }
 
   def allPosMap(tree: Tree): MultiMap[Int, Tree] = {
