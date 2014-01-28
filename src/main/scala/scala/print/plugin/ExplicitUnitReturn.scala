@@ -7,8 +7,8 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
 
   import global._
   
-  //def dbg(msg: String): Unit = {}
-  def dbg(msg: String): Unit = println(msg)
+  private def dbg(msg: String): Unit = {}
+  //def dbg(msg: String): Unit = println(msg)
   
   /**
    * tree: after parser tree
