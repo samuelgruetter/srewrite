@@ -33,7 +33,7 @@ class SRewritePlugin(val global: Global) extends Plugin with Transformations {
   val components = List[PluginComponent](afterParser, afterTyper)
 
   val fileToAfterParserTree = scala.collection.mutable.Map[scala.reflect.io.AbstractFile, global.Tree]()
-  
+
   override def processOptions(options: List[String], error: String => Unit) {
     for (option <- options) {
       if (option.startsWith(baseDirectoryOpt)) {
@@ -119,16 +119,34 @@ class SRewritePlugin(val global: Global) extends Plugin with Transformations {
       override def name = SRewritePlugin.this.name
 
       def apply(unit: CompilationUnit) {
+        /*
+        try {
+            //regenerate only scala files
+            val fileName = unit.source.file.name
+
+            if (fileName.endsWith(".scala")) {
+              println("-- Source name: " + fileName + " --")
+              val sourceCode = transformations(unit.body, unit)
+
+              writeSourceCode(unit, sourceCode, "before_" + nextPhase)
+            } else
+              println("-- Source name: " + fileName + " is not processed")
+        } catch {
+          case e: Exception =>
+            e.printStackTrace()
+            throw e
+        }
+        */
         try {
             //regenerate only scala files
             val fileName = unit.source.file.name
             if (fileName.endsWith(".scala")) {
-              
+
                // looks like duplicate does not copy position
               fileToAfterParserTree.update(unit.source.file, unit.body/*.duplicate*/)
-              
+
               println("-- Source name: " + fileName + " --")
-              
+
             } else
               println("-- Source name: " + fileName + " is not processed")
         } catch {
@@ -139,7 +157,7 @@ class SRewritePlugin(val global: Global) extends Plugin with Transformations {
       }
     }
   }
-  
+
   class AfterTyperPhaseComponent(val prevPhase: String, val nextPhase: String) extends PluginComponent {
     val global: SRewritePlugin.this.global.type = SRewritePlugin.this.global
 
@@ -156,18 +174,18 @@ class SRewritePlugin(val global: Global) extends Plugin with Transformations {
         try {
             //regenerate only scala files
             val fileName = unit.source.file.name
-            
-            if (fileName.endsWith(".scala")) {            
+
+            if (fileName.endsWith(".scala")) {
               val afterParserTree = fileToAfterParserTree(unit.source.file)
               val afterTyperTree = unit.body
-              
+
               // release stuff:
               fileToAfterParserTree.remove(unit.source.file)
-              
+
               println("-- Source name: " + fileName + " --")
-              
+
               val sourceCode = transformations(afterParserTree, afterTyperTree, unit)
-              
+
               writeSourceCode(unit, sourceCode, "before_" + nextPhase)
             } else
               println("-- Source name: " + fileName + " is not processed")
