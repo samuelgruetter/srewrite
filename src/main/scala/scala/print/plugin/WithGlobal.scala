@@ -5,9 +5,12 @@ import scala.tools.nsc.Global
 trait WithGlobal {
   val global: Global
   import global._
-    
-  def traverse(tree: Tree)(action: Tree => Unit): Unit = {
-    action(tree)
-    tree.children.foreach(t => traverse(t)(action))
+
+  /** action: (parent, child) => Unit */
+  def traverse(tree: Tree)(action: (Tree, Tree) => Unit): Unit = {
+    for (child <- tree.children) {
+      action(tree, child)
+      traverse(child)(action)
+    }
   }
 }

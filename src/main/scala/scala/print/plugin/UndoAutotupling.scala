@@ -8,7 +8,7 @@ trait UndoAutotupling extends WithGlobal with ExtractChildren {
   import global._
 
   private def dbg(msg: String): Unit = println(msg)
-  
+
   def undoAutotupling(afterParser: Tree, afterTyper: Tree, source: Array[String], cu: CompilationUnit): Unit = {
     val autotupled = scala.collection.mutable.Set[Tree]()
     markAutotupling(afterParser, afterTyper, t => autotupled.add(t))
@@ -72,7 +72,7 @@ trait UndoAutotupling extends WithGlobal with ExtractChildren {
            && ! func1.toString.contains("Tuple" + arity) // <- don't do anything if implicit conversion applied to a tuple
         )*/
         if (args2.length == args1.length &&
-            isTupleConstrFunc(tupleConstrFunc, arity) && 
+            isTupleConstrFunc(tupleConstrFunc, arity) &&
             ! isTupleConstrFunc(func1, arity)
         ) {
           // println("-----" + tupleConstr.toString)
@@ -84,7 +84,7 @@ trait UndoAutotupling extends WithGlobal with ExtractChildren {
       case _ =>
     }
   }
-  
+
   def isTupleConstrFunc(t: Tree, arity: Int): Boolean = t match {
     // With explicit type parameters for tuple construction function:
     // blahprefix.Tuple3.apply[T1, T2, T3]
@@ -92,32 +92,32 @@ trait UndoAutotupling extends WithGlobal with ExtractChildren {
         if tupleName.encoded == "Tuple" + arity && applyName.encoded == "apply" => true
     // blahprefix.Tuple3[T1, T2, T3]
     case TypeApply(Select(blah, tupleName), types)
-        if tupleName.encoded == "Tuple" + arity => true 
-    
+        if tupleName.encoded == "Tuple" + arity => true
+
     // Without explicit type parameters:
     // blahprefix.Tuple3.apply
-    case Select(Select(blah, tupleName), applyName) 
+    case Select(Select(blah, tupleName), applyName)
     	if tupleName.encoded == "Tuple" + arity && applyName.encoded == "apply" => true
     // blahprefix.Tuple3
-    case Select(blah, tupleName) 
-        if tupleName.encoded == "Tuple" + arity => true 
-    
+    case Select(blah, tupleName)
+        if tupleName.encoded == "Tuple" + arity => true
+
     case _ => false
   }
-  
-  
+
+
   def reportReplacement(tree1: Tree, tree2: Tree): Unit = {
     dbg("----old:----")
     dbg(tree1.toString)
     dbg(showCaseClass(tree1))
-    dbg("----new:----") 
+    dbg("----new:----")
     dbg(tree2.toString)
     dbg(showCaseClass(tree2))
   }
 
   def allPosMap(tree: Tree): MultiMap[Position, Tree] = {
     val mm = new HashMap[Position, Set[Tree]] with MultiMap[Position, Tree]
-    traverse(tree) { t => { if (hasPos(t)) mm.addBinding(t.pos, t) } }
+    traverse(tree) { (parent, child) => { if (hasPos(child)) mm.addBinding(child.pos, child) } }
     mm
   }
 

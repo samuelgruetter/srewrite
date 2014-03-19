@@ -17,6 +17,7 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
   def explicitUnitReturn(tree: Tree, source: Array[String], cu: CompilationUnit): Unit = {
 
     def isSecondaryConstructor(dd: DefDef): Boolean = {
+      // Note: could also use that primary constructor is first child
       val s = source.slice(dd.pos.point, dd.pos.point + "this".size).mkString("")
       dbg("s = " + s)
       (s == "this") && (dd.name.toString == "$init$" || dd.name.toString == "<init>")
@@ -77,7 +78,7 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
       }
     }
 
-    traverse(tree)(t => t match {
+    traverse(tree)((parent, child) => child match {
       case dd: DefDef => forOneDefDef(dd, source)
       case _ => // do nothing
     })

@@ -9,7 +9,7 @@ trait Transformations extends UndoAutotupling with ExplicitUnitReturn with Expli
     val source = cu.source.content.map(String.valueOf(_))
     // undoAutotupling(afterParser, afterTyper, source, cu)
     explicitUnitReturn(afterParser, source, cu)
-    // explicitImplicitTypes(afterTyper, source, cu)
+    explicitImplicitTypes(afterTyper, source, cu)
     source.mkString
   }
 
