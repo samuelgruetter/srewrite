@@ -3,23 +3,40 @@ package scala.print.plugin
 import scala.collection.mutable.{ MultiMap, HashMap, Set }
 import scala.reflect.internal.util.OffsetPosition
 
+/** also for procedure syntax in secondary constructors */
 trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
 
   import global._
-  
+
   private def dbg(msg: String): Unit = {}
-  //def dbg(msg: String): Unit = println(msg)
-  
+  //private def dbg(msg: String): Unit = println(msg)
+
   /**
    * tree: after parser tree
    */
   def explicitUnitReturn(tree: Tree, source: Array[String], cu: CompilationUnit): Unit = {
 
-    def forOneDefDef(dd: DefDef, source: Array[String]): Unit =
-      if ((dd.tpt.toString == "Unit" || dd.tpt.toString == "scala.Unit") && 
+    def isSecondaryConstructor(dd: DefDef): Boolean = {
+      val s = source.slice(dd.pos.point, dd.pos.point + "this".size).mkString("")
+      dbg("s = " + s)
+      (s == "this") && (dd.name.toString == "$init$" || dd.name.toString == "<init>")
+    }
+
+    def forOneDefDef(dd: DefDef, source: Array[String]): Unit = {
+      // if dd is not auto-generated (hasPos), but its return type is,
+      // and it's a (secondary) constructor or unit-returning function
+      // and it isn't abstract (unimplemented)
+      if (
+        hasPos(dd) &&
+        !hasPos(dd.tpt) &&
+        !dd.rhs.isEmpty &&
+        (isSecondaryConstructor(dd) || dd.tpt.toString == "Unit" || dd.tpt.toString == "scala.Unit")
+      ) {
+      //cu.echo(dd.pos, "dd.pos")
+      /*if ((dd.tpt.toString == "Unit" || dd.tpt.toString == "scala.Unit") &&
           dd.name.toString != "$init$" &&
           dd.name.toString != "<init>" &&
-          ! dd.rhs.isEmpty) {
+          ! dd.rhs.isEmpty) {*/
         // hasPos requires that it spans strictly more than 0 chars, which is not the case for inserted Unit
         val l = dd.children.filter(hasPos(_)).sortBy(_.pos.start)
         dbg("name = " + dd.name)
@@ -27,9 +44,9 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
         dbg("children = " + dd.children)
         dbg("l = " + l)
         if (l.contains(dd.tpt)) {
-          // Unit explicitly given by user, do nothing
+          // Unit (or constructor result type) explicitly given by user, do nothing
         } else {
-          // Unit not given by user
+          // Unit (or constructor result type) not given by user
           // Note: dd.tpt.pos points to the name of the method, so we can't just insert ': Unit = ' at dd.tpt.pos
           val i = l.indexOf(dd.rhs)
           val start = if (i == 0) dd.pos.start else l(i-1).pos.end
@@ -39,7 +56,7 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
           if (!sl.contains("=")) {
             // procedure syntax, need to insert unit (TODO what if `=` in identifiers or comments?)
             var p = dd.rhs.pos.start
-            
+
             if (source(dd.rhs.pos.start) != "{") {
               // Special case: if rhs is 1 statement surrounded by {}, the {} are removed by the parser and rhs.pos.start does
               // not point to '{', but to the first and only statement in {}
@@ -50,12 +67,15 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
             while (source(p-1).head.isWhitespace) {
               p -= 1
             }
-            val toInsert = if (source(p) == " ") ": Unit =" else ": Unit = "
+            //val toInsert = if (source(p) == " ") ": Unit =" else ": Unit = "
+            val toInsert = (if (dd.tpt.toString == "Unit" || dd.tpt.toString == "scala.Unit") ": Unit =" else " =") +
+                           (if (source(p) == " ") "" else " ")
             source(p) = toInsert + source(p)
             cu.echo(new OffsetPosition(cu.source, p), s"Inserting '$toInsert' here")
           }
         }
       }
+    }
 
     traverse(tree)(t => t match {
       case dd: DefDef => forOneDefDef(dd, source)
@@ -63,14 +83,14 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
     })
   }
 
-  // Unit return type is inserted by parser (which does not make any symbols), so isSynthetic is false for inserted 
+  // Unit return type is inserted by parser (which does not make any symbols), so isSynthetic is false for inserted
   // Unit return types
 
 }
 
 /*
 import scala.tools.nsc.ast.parser.Scanners
-    
+
 trait MyScanners extends Scanners with WithGlobal {
   def getUniqueBracePos(s: String): Int = {
     val sc = new SourceStringScanner(s.toCharArray())
@@ -78,9 +98,9 @@ trait MyScanners extends Scanners with WithGlobal {
     sc.offset
     ???
   }
-  
+
   import global._
-  
+
   class SourceStringScanner(val source: Array[Char]) extends Scanner {
     val buf = source
     override val decodeUni: Boolean = !settings.nouescape.value
