@@ -12,7 +12,7 @@ object SourcePrinter extends Build {
     Seq(
       organization := "org.scala-lang.plugins",
       version := "0.1.0",
-      scalaVersion := "2.10.2"
+      scalaVersion := "2.10.3"
     )
     val assemblyProjectSettings = Seq(
       excludedJars in assembly <<= (fullClasspath in assembly) map { cp => 
