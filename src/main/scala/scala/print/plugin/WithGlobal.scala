@@ -13,4 +13,11 @@ trait WithGlobal {
       traverse(child)(action)
     }
   }
+    
+  def hasPos(tree: Tree): Boolean = try {
+    tree.pos.start < tree.pos.end
+  } catch {
+    case e: java.lang.UnsupportedOperationException => false
+  }
+
 }

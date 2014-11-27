@@ -35,12 +35,6 @@ trait ExtractChildren extends WithGlobal with CaseClassPrinter {
   // hasPos is better criterion than ==Nothing/Any, because Nothing/Any could have been written explicitly
   private def treatTypeBound(b: Tree): Seq[Tree] = if (hasPos(b)) Seq(b) else Seq()
   
-  def hasPos(tree: Tree): Boolean = try {
-    tree.pos.start < tree.pos.end
-  } catch {
-    case e: java.lang.UnsupportedOperationException => false
-  }
-  
   class BadPositionsException extends Exception
 
   def listChildrenWithoutPositionChecks(tree: Tree): Seq[Tree] = listChildrenRaw(tree) filter {
