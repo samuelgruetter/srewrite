@@ -28,14 +28,56 @@ trait EarlyInitializers extends CaseClassPrinter with WithGlobal {
   def earlyInitializers(tree: Tree, source: Array[String], cu: CompilationUnit): Unit = {
 
     traverse(tree)((parent, child) => child match {
-      case Block(ClassDef(_, _, _, templ @ Template(parents, _, templBody)) :: Nil, applyNew) if templBody.exists(isEarly) =>
-        val start = templ.pos.start
+      //case Block(ClassDef(_, _, _, templ @ Template(parents, _, templBody)) :: Nil, applyNew) if templBody.exists(isEarly) =>
+      case templ @ Template(parents, _, templBody) if templBody.exists(isEarly) =>
+
+        // copy early inits into body:
+        
+        val earlyInits = templBody.filter(isEarly)
+        val eiStart = earlyInits.filter(hasPos).map(_.pos.start).min
+        val eiEnd = earlyInits.filter(hasPos).map(_.pos.end).max
+        val eiStr = source.slice(eiStart, eiEnd).mkString("")
+        
+        val parentsEnd = parents.filter(hasPos).last.pos.end
+        val templEnd = templ.pos.end
+        // cu.echo(new OffsetPosition(cu.source, parentsEnd), s"parentsEnd")
+        // cu.echo(new OffsetPosition(cu.source, templEnd), s"templEnd")
+        
+        var lBracePos = -1
+        var i = parentsEnd
+        while (lBracePos == -1 && i < templEnd) {
+          //println(s"i=$i----${source(i)}")
+          if (source(i) == "{") lBracePos = i
+          i += 1
+        }
+        val toInsert = "\n" +
+          "// TODO NEEDS MANUAL CHANGE (early initializers)\n" +
+          "// BEGIN copied early initializers\n" + 
+          eiStr +
+          "\n// END copied early initializers\n"
+        if (lBracePos == -1) { // templ has no body
+          source(templEnd) = " {" + toInsert + "}" + source(templEnd)
+        } else {
+          source(lBracePos) = source(lBracePos) + toInsert
+        }
+        
+        // delete original early initializers:
+        
+        var start = templ.pos.start
+        // if it's not an anonymous class, we have to skip type params and class params:
+        while (source(start) != "{") start += 1
         val end = parents.head.pos.start
         // cu.echo(new OffsetPosition(cu.source, start), s"start pos of Template")
         // cu.echo(new OffsetPosition(cu.source, end), s"start pos of first parent")
         cu.warning(new OffsetPosition(cu.source, start), "MANUAL CHANGE NEEDED for early initializers")
-        source(start) = "/* TODO NEEDS MANUAL CHANGE (early initializers) " + source(start)
-        source(end) = "*/ " + source(end)
+        
+        // comment out early inits:
+        // source(start) = "/* TODO NEEDS MANUAL CHANGE (early initializers) " + source(start)
+        // source(end) = "*/ " + source(end)
+        
+        // delete early inits:
+        for (i <- start until end) source(i) = ""
+        
       case _ => // do nothing
     })
 
