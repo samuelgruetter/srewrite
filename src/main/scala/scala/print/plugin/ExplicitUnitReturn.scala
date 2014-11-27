@@ -24,13 +24,27 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
     }
 
     def forOneDefDef(dd: DefDef, source: Array[String]): Unit = {
-      // if dd is not auto-generated (hasPos), but its return type is,
-      // and it's a (secondary) constructor or unit-returning function
-      // and it isn't abstract (unimplemented)
+      /*
+      println(s"------>${dd.tpt}  ${hasPos(dd)} ${hasPos(dd.tpt)} ${isSecondaryConstructor(dd)} ${dd.tpt.toString == "Unit"} ${dd.tpt.toString == "scala.Unit"})")
+      if (hasPos(dd.tpt)) {
+        cu.echo(new OffsetPosition(cu.source, dd.tpt.pos.start), s"dd.tpt.pos.start = ${dd.tpt.pos.start}")
+        cu.echo(new OffsetPosition(cu.source, dd.tpt.pos.end), s"dd.tpt.pos.end = ${dd.tpt.pos.end}")
+        cu.echo(new OffsetPosition(cu.source, dd.pos.start), s"dd.pos.start = ${dd.pos.start}")
+        cu.echo(new OffsetPosition(cu.source, dd.pos.end), s"dd.pos.end = ${dd.pos.end}")
+        println(s"${dd.tpt.pos.start} ${dd.pos.start} ${dd.tpt.pos.start == dd.pos.start} ${dd.tpt.pos.end} ${dd.pos.end} ${dd.tpt.pos.end == dd.pos.end}")
+      }
+      */
+      // generated positions are either with start==end, or (bug) the same as the enclosing DefDef
+      def hasGeneratedPos(t: Tree): Boolean = {
+        (!hasPos(t)) || (t.pos.start == dd.pos.start && t.pos.end == dd.pos.end) 
+      }
       if (
+        // dd is not auto-generated:
         hasPos(dd) &&
-        !hasPos(dd.tpt) &&
-        !dd.rhs.isEmpty &&
+        // return type is auto-generated (i.e. no pos or a weird one (bug))
+        //((!hasPos(dd.tpt)) || (dd.tpt.pos.start == dd.pos.start && dd.tpt.pos.end == dd.pos.end)) &&
+        hasGeneratedPos(dd.tpt) &&
+        // secondary constructor or return type is Unit
         (isSecondaryConstructor(dd) || dd.tpt.toString == "Unit" || dd.tpt.toString == "scala.Unit")
       ) {
       //cu.echo(dd.pos, "dd.pos")
@@ -39,15 +53,15 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
           dd.name.toString != "<init>" &&
           ! dd.rhs.isEmpty) {*/
         // hasPos requires that it spans strictly more than 0 chars, which is not the case for inserted Unit
-        val l = dd.children.filter(hasPos(_)).sortBy(_.pos.start)
+        val l = dd.children.filter(!hasGeneratedPos(_)).sortBy(_.pos.start)
         dbg("name = " + dd.name)
         dbg("tpt = " + dd.tpt)
         dbg("children = " + dd.children)
         dbg("l = " + l)
         if (l.contains(dd.tpt)) {
           // Unit (or constructor result type) explicitly given by user, do nothing
-        } else {
-          // Unit (or constructor result type) not given by user
+        } else if (!dd.rhs.isEmpty) {
+          // Unit (or constructor result type) not given by user, and method is not abstract
           // Note: dd.tpt.pos points to the name of the method, so we can't just insert ': Unit = ' at dd.tpt.pos
           val i = l.indexOf(dd.rhs)
           val start = if (i == 0) dd.pos.start else l(i-1).pos.end
@@ -74,6 +88,12 @@ trait ExplicitUnitReturn extends WithGlobal with ExtractChildren {
             source(p) = toInsert + source(p)
             cu.echo(new OffsetPosition(cu.source, p), s"Inserting '$toInsert' here")
           }
+        } else {
+          // abstract method returning Unit without explicitly mentioning it
+          val p = dd.pos.end
+          val toInsert = ": Unit"
+          source(p) = toInsert + source(p)
+          cu.echo(new OffsetPosition(cu.source, p), s"Inserting '$toInsert' here")
         }
       }
     }
