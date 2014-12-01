@@ -7,20 +7,7 @@ trait ForSome extends CaseClassPrinter with WithGlobal {
 
   import global._
 
-  val debug: Boolean = false
-  var indent = 0
-  def traceIndented[T](message: => String)(op: => T) = {
-    if (debug) {
-      val msg = message
-      println("  " * indent + "==> " + msg)
-      indent += 1
-      op
-      indent -= 1
-      println("  " * indent + "<== " + msg)
-    } else {
-      op
-    }
-  }
+  private val debug: Boolean = false
   
   /**
    * Given a TypeDef such as e.g. `type T >: Bar <: Foo` which is used to bound an existentially quantified type,
@@ -41,7 +28,7 @@ trait ForSome extends CaseClassPrinter with WithGlobal {
       "<no source>"
     }
 
-    def rec(parent: Tree, tree: Tree): Unit = traceIndented(tree.getClass.getSimpleName + " # " + tree + " # " + originalSource(tree)){
+    def rec(parent: Tree, tree: Tree): Unit = traceIndented(debug, tree.getClass.getSimpleName + " # " + tree + " # " + originalSource(tree)){
       tree match {
         case extyp @ ExistentialTypeTree(tp, whereClauses) if whereClauses.exists(isWhereClauseInsideForSome) =>
           // cu.echo(new OffsetPosition(cu.source, extyp.pos.start), s"start of ExistentialTypeTree")

@@ -20,4 +20,19 @@ trait WithGlobal {
     case e: java.lang.UnsupportedOperationException => false
   }
 
+  var indent = 0
+
+  def traceIndented[T](debug: Boolean, message: => String)(op: => T) = {
+    if (debug) {
+      val msg = message
+      println("  " * indent + "==> " + msg)
+      indent += 1
+      op
+      indent -= 1
+      println("  " * indent + "<== " + msg)
+    } else {
+      op
+    }
+  }
+
 }

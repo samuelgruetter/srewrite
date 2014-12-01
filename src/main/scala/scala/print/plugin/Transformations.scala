@@ -8,6 +8,7 @@ trait Transformations
   with ExplicitImplicitTypes
   with EarlyInitializers
   with ForSome
+  with VarargsPatterns
   with WithGlobal
 {
   import global._
@@ -18,6 +19,7 @@ trait Transformations
     explicitUnitReturn(afterParser, source, cu)
     earlyInitializers(afterParser, source, cu)
     forSomeToWildcard(afterTyper, source, cu)
+    varargsPatterns(afterTyper, source, cu)
     explicitImplicitTypes(afterTyper, source, cu)
     source.mkString
   }
