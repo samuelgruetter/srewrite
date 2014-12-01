@@ -3,7 +3,12 @@ package scala.print.plugin
 import scala.tools.nsc.Global
 
 trait Transformations
-  extends UndoAutotupling with ExplicitUnitReturn with ExplicitImplicitTypes with EarlyInitializers with WithGlobal
+  extends UndoAutotupling
+  with ExplicitUnitReturn
+  with ExplicitImplicitTypes
+  with EarlyInitializers
+  with ForSome
+  with WithGlobal
 {
   import global._
 
@@ -12,6 +17,7 @@ trait Transformations
     // undoAutotupling(afterParser, afterTyper, source, cu)
     explicitUnitReturn(afterParser, source, cu)
     earlyInitializers(afterParser, source, cu)
+    forSomeToWildcard(afterTyper, source, cu)
     explicitImplicitTypes(afterTyper, source, cu)
     source.mkString
   }
