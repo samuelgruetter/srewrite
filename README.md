@@ -6,13 +6,14 @@ In order to compile Scala code written for `scalac` 2 with  [dotty](https://gith
 Here's a list of these changes:
 
 *    [DONE] explicit unit return types (ie. no "procedure syntax" for defs)
-*    [TODO] explicit unit return types for abstract methods as well
+*    [DONE] explicit unit return types for abstract methods as well
 *    [DONE] explicit types for implicit vals
-*    [TODO] existential types (`forSome`) rewriting
-*    [TODO] rewrite early initializers to late (normal) initializers and emit a big warning that it has to be reviewed manually
+*    [DONE] existential types (`forSome`) rewriting
+*    [DONE] rewrite early initializers to late (normal) initializers and emit a big warning that it has to be reviewed manually
 *    [TODO] add an `@volatile` annotation to all lazy vals
 *    [Not needed] Autotupling. For instance, why does `List(1, 2, 3).toSet()` return `false`? See also this [discussion](https://groups.google.com/forum/#!topic/scala-debate/zwG8o2YzCWs) and this [blog post](http://dan.bodar.com/2013/12/04/wat-scala/).
 *    [TODO] do not add newline to end of file if there's none
+*    [TODO] imports are shadowed by class definitions in dotty (see `test/importShadowing.scala` for an example)
 *    [TODO] probably we need more transformations that we're not yet aware of
 
 The challenge: Don't just reprint the whole code using any PrettyPrinter, loosing all formatting and comments. Modify the code as little as possible.
