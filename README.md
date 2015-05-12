@@ -14,6 +14,7 @@ Here's a list of these changes:
 *    [Not needed] Autotupling. For instance, why does `List(1, 2, 3).toSet()` return `false`? See also this [discussion](https://groups.google.com/forum/#!topic/scala-debate/zwG8o2YzCWs) and this [blog post](http://dan.bodar.com/2013/12/04/wat-scala/).
 *    [TODO] do not add newline to end of file if there's none
 *    [TODO] imports are shadowed by class definitions in dotty (see `test/importShadowing.scala` for an example)
+*    [TODO] In val defs of the form `val x = new SomeClass { refinements... }`, scalac infers a refined type as type of `x`, whereas dotty only infers `SomeClass`, so the rewrite tool should insert an explicit refined type for `x`.
 *    [TODO] probably we need more transformations that we're not yet aware of
 
 The challenge: Don't just reprint the whole code using any PrettyPrinter, loosing all formatting and comments. Modify the code as little as possible.
